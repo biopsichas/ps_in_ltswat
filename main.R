@@ -166,7 +166,7 @@ pst_info_prc <- pst_info %>%
   mutate(prc = round(100*load/load_kg_y, 3)) %>%
   left_join(segments, by = c("cach_id" = "id"))
 
-columns(pst_info_prc) <- c("Išleistuvo kodas", "Ūkio subjekto pavadinimas",
+colnames(pst_info_prc) <- c("Išleistuvo kodas", "Ūkio subjekto pavadinimas",
                            "Teršalo pavadinimas", "Teršalo kiekis išleidžiamose nuotekose, kg/metus",
                         "cach_id", "Subbasin", "Setup_name", "GRIDCODE",
                         "Teršalo kiekis SWAT kg/metus", "Nuotėkų šaltinių dalis (%)",
