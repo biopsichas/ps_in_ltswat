@@ -25,7 +25,7 @@ gis_path <- "Data/GIS/"
 point_source_file <- "2023.csv"
 
 ## Model setup file name to read
-setup_file <- "/v_dec_tbl_PAIC9/channel_sd_aa.txt"
+setup_name <- "v_dec_tbl_PAIC9"
 
 ##------------------------------------------------------------------------------
 ## 3) Reading data
@@ -116,11 +116,13 @@ sstable <- basins %>% st_drop_geometry %>% select(Subbasin, Setup_name) %>% uniq
 ##------------------------------------------------------------------------------
 
 df <- NULL
-for(i in 1:dim(v)[1]){
-  f_path <- paste0(setup_path, sstable[i, "Subbasin"], "/", sstable[i, "Setup_name"], setup_file)
+for(i in 1:dim(sstable)[1]){
+  f_path <- paste0(setup_path, sstable[i, "Subbasin"], "/", sstable[i, "Setup_name"],
+                   "/", setup_name, "/channel_sd_aa.txt")
   if (file.exists(f_path)) {
     txt <- SWATreadR::read_swat(f_path) %>%
-      select(c("unit", "flo_out", "sedp_out", "solp_out", "orgn_out", "nh3_out", "no3_out", "no2_out", "cbod_out"))%>%
+      select(c("unit", "flo_out", "sedp_out", "solp_out", "orgn_out", "nh3_out",
+               "no3_out", "no2_out", "cbod_out"))%>%
       mutate(ntot_out = orgn_out + nh3_out + no3_out + no2_out,
              ptot_out = sedp_out + solp_out,
              bod7_out = cbod_out * 1.2,
@@ -164,7 +166,13 @@ pst_info_prc <- pst_info %>%
   mutate(prc = round(100*load/load_kg_y, 3)) %>%
   left_join(segments, by = c("cach_id" = "id"))
 
+columns(pst_info_prc) <- c("Išleistuvo kodas", "Ūkio subjekto pavadinimas",
+                           "Teršalo pavadinimas", "Teršalo kiekis išleidžiamose nuotekose, kg/metus",
+                        "cach_id", "Subbasin", "Setup_name", "GRIDCODE",
+                        "Teršalo kiekis SWAT kg/metus", "Nuotėkų šaltinių dalis (%)",
+                        "Kadastro kodas", "VT kodas (upė)", "VT kodas (ežeras)")
+
 ## Saving the resulting table as csv
-write.csv(pst_info_prc, file = paste0(setup_path, "point_source_loads.csv"),
+write.csv(pst_info_prc, file = paste0("point_source_loads.csv"),
           row.names = FALSE, fileEncoding = "UTF-8", quote = FALSE)
 
