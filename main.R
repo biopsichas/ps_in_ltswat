@@ -27,6 +27,9 @@ point_source_file <- "2023.csv"
 ## Model setup file name to read
 setup_name <- "v_dec_tbl_PAIC9"
 
+## Which channel_sd files to read for yearly - "yr", for annual averages "aa"
+channel_sd <- "yr"
+
 ##------------------------------------------------------------------------------
 ## 3) Reading data
 ##------------------------------------------------------------------------------
@@ -118,11 +121,13 @@ sstable <- basins %>% st_drop_geometry %>% select(Subbasin, Setup_name) %>% uniq
 df <- NULL
 for(i in 1:dim(sstable)[1]){
   f_path <- paste0(setup_path, sstable[i, "Subbasin"], "/", sstable[i, "Setup_name"],
-                   "/", setup_name, "/channel_sd_aa.txt")
+                   "/", setup_name, "/channel_sd_", channel_sd, ".txt")
   if (file.exists(f_path)) {
     txt <- SWATreadR::read_swat(f_path) %>%
       select(c("unit", "flo_out", "sedp_out", "solp_out", "orgn_out", "nh3_out",
-               "no3_out", "no2_out", "cbod_out"))%>%
+               "no3_out", "no2_out", "cbod_out")) %>%
+      group_by(unit) %>%
+      summarise(across(everything(), function(x) mean(x, na.rm = TRUE))) %>%
       mutate(ntot_out = orgn_out + nh3_out + no3_out + no2_out,
              ptot_out = sedp_out + solp_out,
              bod7_out = cbod_out * 1.2,
@@ -143,7 +148,7 @@ for(i in 1:dim(sstable)[1]){
 ## 6) Cleaning up modeling data
 ##------------------------------------------------------------------------------
 
-df0 <- df %>%
+df_fix <- df %>%
   mutate(pollutant_name = case_when(
     var_name == "solp_out" ~ "Fosfatinis fosforas (PO4-P)",
     var_name == "no3_out" ~ "Nitratinis azotas (NO3-N)",
@@ -162,7 +167,7 @@ df0 <- df %>%
 ##------------------------------------------------------------------------------
 
 pst_info_prc <- pst_info %>%
-  left_join(df0, by = c("pollutant_name", "Subbasin", "Setup_name", "GRIDCODE")) %>%
+  left_join(df_fix, by = c("pollutant_name", "Subbasin", "Setup_name", "GRIDCODE")) %>%
   mutate(prc = round(100*load/load_kg_y, 3)) %>%
   left_join(segments, by = c("cach_id" = "id"))
 
