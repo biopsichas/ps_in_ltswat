@@ -45,8 +45,7 @@ basins <- st_read(dsn = paste0(gis_path,"basin.gdb"), layer = "basin",
 
 ## Read reaches shae file
 segments <- st_read(paste0(gis_path, "segments_coarse.shp"), quiet = T) %>%
-  st_drop_geometry %>%
-  select(id, kadastroid, wbriver_co, wlake_wb)
+  st_drop_geometry
 
 ##------------------------------------------------------------------------------
 ## 4) Cleaning and transforming point source data
@@ -148,6 +147,12 @@ for(i in 1:dim(sstable)[1]){
 ## 6) Cleaning up modeling data
 ##------------------------------------------------------------------------------
 
+## Just to add cach_id info
+basins_df <- basins %>%
+  st_drop_geometry %>%
+  select(cach_id, Subbasin, Setup_name, GRIDCODE)
+
+## Joining SWAT output data with basin information, cleaning names, filtering
 df_fix <- df %>%
   mutate(pollutant_name = case_when(
     var_name == "solp_out" ~ "Fosfatinis fosforas (PO4-P)",
@@ -160,22 +165,88 @@ df_fix <- df %>%
   )) %>%
   filter(!is.na(pollutant_name)) %>%
   rename(GRIDCODE = unit) %>%
-  select(pollutant_name, Subbasin, Setup_name, GRIDCODE, load_kg_y)
+  select(pollutant_name, Subbasin, Setup_name, GRIDCODE, load_kg_y) %>%
+  left_join(basins_df, by = c("Subbasin", "Setup_name", "GRIDCODE"))
 
 ##------------------------------------------------------------------------------
-## 7) Calculating final table with precentages of point source impacts
+## 7) Get lookup1 table for catch ids that represents the downstream segments of WBs
+##------------------------------------------------------------------------------
+
+# Convert to a named list for fast lookup by 'id'
+segments_lookup <- segments %>%
+  select(id, riverto, wbriver_co, wlake_wb) %>%
+  tibble::column_to_rownames("id")
+
+# Prepare an empty results data frame
+lookup1 <- tibble(id = numeric(), real_id = numeric())
+
+# Loop over each segment
+for (start_id in segments$id) {
+  current_id <- start_id
+  wb <- wb2 <- "S"  # Initial dummy values to enter the loop
+
+  # Traverse downstream until waterbody changes
+  while (TRUE) {
+    current_row <- segments_lookup[as.character(current_id), ]
+
+    # Determine current segment's waterbody
+    wb <- if (!is.na(current_row$wbriver_co)) current_row$wbriver_co
+    else if (!is.na(current_row$wlake_wb)) current_row$wlake_wb
+    else wb
+
+    # Get the ID of the downstream segment
+    next_id <- current_row$riverto
+
+    # If there is a downstream segment, get its waterbody
+    if (next_id != -1 && as.character(next_id) %in% rownames(segments_lookup)) {
+      next_row <- segments_lookup[as.character(next_id), ]
+      wb2 <- if (!is.na(next_row$wbriver_co)) next_row$wbriver_co
+      else if (!is.na(next_row$wlake_wb)) next_row$wlake_wb
+      else wb2
+    } else {
+      wb2 <- "E"  # if end of river system
+    }
+
+    # If waterbody changes or flow ends, mark the transition point
+    if (wb2 == "E") {
+      lookup1 <- add_row(lookup1, id = start_id, real_id = current_id)
+      break
+    } else if (wb == "S") {
+      NULL # Continue, if no waterbody code at the start
+    } else if (wb != wb2) {
+      lookup1 <- add_row(lookup1, id = start_id, real_id = current_id)
+      break
+    }
+    # Continue traversal
+    current_id <- next_id
+  }
+}
+
+##------------------------------------------------------------------------------
+## 8) Calculating final table with percentages of point source impacts
 ##------------------------------------------------------------------------------
 
 pst_info_prc <- pst_info %>%
-  left_join(df_fix, by = c("pollutant_name", "Subbasin", "Setup_name", "GRIDCODE")) %>%
+  left_join(lookup1, by = c("cach_id" = "id")) %>%
+  left_join(df_fix[c("cach_id", "pollutant_name", "load_kg_y")], by = c("pollutant_name", "cach_id")) %>%
   mutate(prc = round(100*load/load_kg_y, 3)) %>%
-  left_join(segments, by = c("cach_id" = "id"))
+  left_join(df_fix[c("cach_id", "pollutant_name", "load_kg_y")] %>%
+              rename(rload_kg_y = load_kg_y), by = c("pollutant_name", "real_id" = "cach_id")) %>%
+  mutate(rprc = ifelse(rload_kg_y > 0, round(100*load/rload_kg_y, 3), prc)) %>%
+  left_join(select(segments, id, kadastroid, wbriver_co, wlake_wb), by = c("cach_id" = "id")) %>%
+  left_join(select(segments, id, wbriver_co, wlake_wb) %>%
+              rename(rwbriver_co = wbriver_co,
+                     rwlake_wb = wlake_wb), by = c("real_id" = "id")) %>%
+  mutate(wbriver_co = ifelse(is.na(wbriver_co), rwbriver_co, wbriver_co),
+         wlake_wb = ifelse(is.na(wlake_wb), rwlake_wb, wlake_wb)) %>%
+  select(-c("rwbriver_co", "rwlake_wb"))
 
 colnames(pst_info_prc) <- c("Išleistuvo kodas", "Ūkio subjekto pavadinimas",
-                           "Teršalo pavadinimas", "Teršalo kiekis išleidžiamose nuotekose, kg/metus",
-                        "cach_id", "Subbasin", "Setup_name", "GRIDCODE",
-                        "Teršalo kiekis SWAT kg/metus", "Nuotėkų šaltinių dalis (%)",
-                        "Kadastro kodas", "VT kodas (upė)", "VT kodas (ežeras)")
+                           "Teršalo pavadinimas", "Teršalo kiekis išleidžiamose nuotekose (kg/metus)",
+                        "Tiesioginis VT cach_id", "Subbasin", "Setup_name", "GRIDCODE", "Žemiausio taško VT cach_id",
+                        "Teršalo kiekis SWAT kg/metus (tiesioginis VT)", "Nuotėkų šaltinių dalis (% tiesioginiame VT)",
+                        "Teršalo kiekis SWAT kg/metus (žemiausias VT taškas)", "Nuotėkų šaltinių dalis (%  žemiausias VT taškas)",
+                        "Kadastro kodas (tiesioginis VT)", "VT kodas (upė)", "VT kodas (ežeras)")
 
 ## Saving the resulting table as csv
 write.csv(pst_info_prc, file = paste0("point_source_loads.csv"),
