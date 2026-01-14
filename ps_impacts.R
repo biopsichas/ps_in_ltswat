@@ -91,9 +91,9 @@ pnt_df <- pnt_source_df %>%
   filter(avg_concentration > 0) %>%
   mutate(time_dif = as.numeric(end - start + 1)) %>%
   mutate(load = ifelse(time_dif == max(time_dif, na.rm = TRUE),
-                       wastewater_volume * avg_concentration / 1000,
+                       wastewater_volume * avg_concentration,
                        (time_dif / max(time_dif, na.rm = TRUE)) *
-                         wastewater_volume * avg_concentration / 1000)) %>%
+                         wastewater_volume * avg_concentration)) %>%
   st_as_sf(coords = c("x", "y"), crs = 3346)
 
 ## Joining basins information to point source codes with spatial overlay
