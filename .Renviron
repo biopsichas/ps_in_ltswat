@@ -1,0 +1,4 @@
+LT_DB_USER=postgres
+LT_DB_HOST=localhost
+LT_DB_PORT=5440
+LT_DB_NAME=LTSWAT2020_coarse

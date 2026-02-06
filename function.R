@@ -417,10 +417,14 @@ read_recall_output <- function(subb, setup) {
   base_path <- file.path(setup_path, subb, setup, sc_base,  "recall_yr.txt")
 
   if (!file.exists(base_path) || length(count.fields(base_path)) < 4) return(NULL)
+
+  match_val <- ps_max$val[ps_max$Subbasin == subb & ps_max$Setup_name == setup]
+  ps_count <- if (length(match_val) > 0) match_val[1] else return(NULL)
   SWATreadR::read_swat(base_path) |>
-    mutate(id = paste0("pt", stringr::str_sub(name, -2, -1)),
+    mutate(id = readr::parse_number(name),
            Subbasin = subb,
            Setup_name = setup) |>
+    filter(id <= ps_count) |>
     select(Subbasin, Setup_name, id, yr, all_of(cols_to_scale)) |>
     rename(year = yr)
 }
@@ -439,3 +443,34 @@ read_apportionment <- function(file, year) {
     mutate(year = year)
 }
 
+# Function to check balance and summarize data frame
+check_balance <- function(df) {
+  # 1. Date Handling: Convert to year if it's a string/date
+  if (is.Date(df$year[[1]]) && grepl("^\\d{4}-\\d{2}-\\d{2}$", df$year[[1]])) {
+    df <- mutate(df, year = year(as.Date(year)))
+  }
+
+  # 2. Aggregation Logic
+  df_summary <- df |>
+    select(-any_of("id")) |>
+    # Aggregate by year and gis_id first, then immediately by year
+    group_by(year, gis_id) |>
+    summarise(across(everything(), \(x) sum(x, na.rm = TRUE)), .groups = "drop_last") |>
+    summarise(across(-gis_id, \(x) sum(x, na.rm = TRUE)), .groups = "drop") |>
+    # Convert to thousands and round
+    mutate(across(-c(year), \(x) round(x / 1000, 1))) |>
+    # Calculate Mean across all years
+    summarise(across(-year, \(x) round(mean(x, na.rm = TRUE), 1)))
+
+  # 3. Column Ordering
+  desired_order <- c("flo", "ntot", "ptot", "sed", "orgn", "no3",
+                     "no2", "nh3", "solp", "sedp", "cbod")
+
+  df_final <- df_summary |>
+    select(any_of(desired_order))
+
+  # 4. Feedback
+  message("Units: Summarized data in t/year, flo in 1000 m3/year and sed in 1000 t/year.")
+
+  return(df_final)
+}
