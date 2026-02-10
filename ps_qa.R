@@ -203,6 +203,21 @@ print(lt_con)
 ps_catchment <- load_table(lt_con, "point_sources", "ps_catchment")
 small_catch  <- load_table(lt_con, "point_sources", "small_up2024")
 
+## Values taken from pointsource_utils.py
+fill_gaps <- data.frame(type = c(700,600,500,300,313,312,311,307,306,305,304,303,
+                                 302,101,100,0,301,200,900,400,3130,3131),
+                        Ntot = c(1.2,1.2,0.8,1.9,1.7,2.0,2.1,1.9,1.2,2.2,2.2,
+                                   1.5,1.6,0.97,0.97,0.8,1.9,1.9,1.2,0.8,1.7,1.9),
+                        NH4 = c(0.4,0.1,0.8,0.7,0.25,0.4,0.5,0.7,0.6,0.5,0.4,
+                                  0.6,0.6,0.6,0.6,0.4,0.7,0.7,0.4,0.8,0.25,0.7),
+                        NO3 = c(0.5,0.8,0.02,0.2,0.4,0.4,0.3,0.2,0.1,0.3,0.3,
+                                  0.13,0.15,0.1,0.1,0.3,0.2,0.2,0.5,0.02,0.4,0.2),
+                        Ptot = c(0.3,0.3,0.2,0.16,0.2,0.5,0.4,0.4,0.3,0.4,0.4,
+                                   0.2,0.4,0.14,0.14,0.1,0.16,0.15,0.3,0.2,0.16,0.2))|>
+  mutate(PO4 = Ptot * 0.7) |>
+  pivot_longer(cols = -type, names_to = "nutrient",
+               values_to = "concentration_base")
+
 ##  Monthly SWAT point source file
 ps_monthly_path <- file.path(
   sub(
@@ -252,9 +267,10 @@ df_ps <- df_raw |>
 
 ## Add cach_id
 small_catch <- small_catch |>
-  select(year, name, nutrient, concentration, discharge, x, y) %>%
+  select(year, name, type, nutrient, concentration, discharge, x, y) %>%
   st_as_sf(coords = c("x", "y"), crs = 3346, remove = FALSE) |>
   st_join(basins[,c("cach_id")], left = TRUE) |>
+  mutate(type = as.integer(type)) |>
   st_drop_geometry()
 
 ## Small catchments (DB-based point sources)
@@ -270,6 +286,49 @@ df_small_flo <- small_catch[,c("year", "name", "discharge", "y", "x", "cach_id")
 
 ## Calculating loads from concentrations and discharges for small point sources
 df_small <- small_catch |>
+  mutate(coord = paste0(x,"_",y)) |>
+  select(name, coord, year, type, nutrient, concentration, discharge, cach_id) |>
+  left_join(fill_gaps, by = c("type", "nutrient")) |>
+  # Fill gaps only if concentration is NA or zero and there is a base value to fill with
+  mutate(concentration = ifelse((is.na(concentration) | concentration <= 0) &
+                                  !is.na(concentration_base) , concentration_base, concentration)) |>
+  select(-concentration_base) |>
+  mutate(concentration = ifelse(is.na(concentration) | concentration < 0, 0, concentration))
+
+## First aggregate by name, year, type, coord, cach_id, nutrient to get weighted mean concentration and total discharge
+df_agg <- df_small |>
+  group_by(name, year, type, coord, cach_id, nutrient) |>
+  summarise(
+    concentration = weighted.mean(concentration, discharge, na.rm = TRUE),
+    discharge = sum(discharge, na.rm = TRUE),
+    type = first(type),
+    .groups = "drop"
+  ) |>
+  # Reshape to wide format to apply nutrient-specific rules
+  pivot_wider(
+    id_cols    = c(name, coord, year, type, cach_id, discharge),
+    names_from = nutrient,
+    values_from = concentration,
+    values_fill = 0
+  ) |>
+  mutate(PO4 = ifelse(PO4>Ptot, 0, PO4),
+         NO3 = ifelse(NO3>Ntot, 0, NO3),
+         NH4 = ifelse(NH4>Ntot, 0, NH4),
+         NO2 = ifelse(NO2>Ntot, 0, NO2),
+         NO3 = ifelse(NO3>Ntot - NH4 - NO2, 0, NO3),
+         NH4 = ifelse(NH4>Ntot - NO3 - NO2, 0, NH4),
+         NO2 = ifelse(NO2>Ntot - NO3 - NH4, 0, NO2)) |>
+  pivot_longer(cols = -c(name, coord, year, type, cach_id, discharge),
+               names_to = "nutrient",
+               values_to = "concentration") |>
+  ## Filling gaps again for all variables, which have not been in the database.
+  left_join(fill_gaps, by = c("type", "nutrient")) |>
+  mutate(concentration = ifelse(concentration == 0, concentration_base, concentration)) |>
+  select(-concentration_base) |>
+  mutate(concentration = ifelse(is.na(concentration) | concentration < 0, 0, concentration))
+
+## Preparing loads for small point sources, applying nutrient-specific rules and filling gaps as needed
+df_small_filled <- df_agg |>
   select(year, nutrient, concentration, discharge, cach_id) |>
   mutate(
     load = concentration * discharge  # seconds/year conversion
@@ -321,7 +380,7 @@ df_raw_in <- df_ps |>
 # print("Big point sources")
 # check_balance(df_ps|> filter(year %in% yr_sel))
 # print("Small point sources")
-# check_balance(df_small|> filter(year %in% yr_sel))
+# check_balance(df_small_filled|> filter(year %in% yr_sel))
 # print("Joinned data")
 # check_balance(df_raw_in|> filter(year %in% yr_sel))
 
