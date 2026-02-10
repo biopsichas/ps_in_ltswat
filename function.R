@@ -467,7 +467,17 @@ check_balance <- function(df) {
                      "no2", "nh3", "solp", "sedp", "cbod")
 
   df_final <- df_summary |>
-    select(any_of(desired_order))
+    select(starts_with("flo"),
+           starts_with("ntot"),
+           starts_with("ptot"),
+           starts_with("sed"),
+           starts_with("orgn"),
+           starts_with("no3"),
+           starts_with("no2"),
+           starts_with("nh3"),
+           starts_with("solp"),
+           starts_with("sedp"),
+           starts_with("cbod"))
 
   # 4. Feedback
   message("Units: Summarized data in t/year, flo in 1000 m3/year and sed in 1000 t/year.")
