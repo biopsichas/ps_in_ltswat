@@ -370,9 +370,9 @@ df_raw_in <- df_ps |>
     across(everything(), \(x) sum(x, na.rm = TRUE)),
     .groups = "drop"
   ) |>
-  select(names(df_small)) |>
+  select(names(df_small_filled)) |>
   mutate(gis_id = as.numeric(gis_id)) |>
-  bind_rows(df_small) |>
+  bind_rows(df_small_filled) |>
   group_by(year, gis_id) |>
   summarise(
     across(where(is.numeric), \(x) sum(x, na.rm = TRUE)),
@@ -383,7 +383,7 @@ df_raw_in <- df_ps |>
 print("Big point sources")
 check_balance(df_ps)
 print("Small point sources")
-check_balance(df_small)
+check_balance(df_small_filled)
 print("Joinned data")
 check_balance(df_raw_in)
 
