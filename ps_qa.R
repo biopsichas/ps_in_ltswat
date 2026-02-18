@@ -263,7 +263,8 @@ df_ps <- df_raw |>
       select(psid, catchmentid) |>
       rename(id = psid, gis_id = catchmentid),
     by = "id"
-  )
+  )|>
+  mutate(across(where(bit64::is.integer64), as.numeric))
 
 ## Add cach_id
 small_catch <- small_catch |>
@@ -274,15 +275,17 @@ small_catch <- small_catch |>
   st_drop_geometry()
 
 ## Small catchments (DB-based point sources)
-df_small_flo <- small_catch[,c("year", "name", "discharge", "y", "x", "cach_id")]|>
+df_small_flo <- small_catch[,c("year", "name", "type", "discharge", "y", "x", "cach_id")] |>
   mutate(coord = paste0(x,"_",y)) |>
   select(-c(x, y)) |>
-  group_by(year, coord, name, cach_id) |>
-  summarise(flo = sum(discharge * 1000, na.rm = TRUE), .groups = "drop") |>
+  group_by(year, coord, name, cach_id, type, discharge) |>
+  unique()|>
+  summarise(flo = sum(discharge * 1000, na.rm = TRUE), .groups = "drop") |> ##
   select(-c(coord, name)) |>
   group_by(year, cach_id) |>
   summarise(flo = sum(flo, na.rm = TRUE), .groups = "drop") |>
-  rename(gis_id = cach_id)  # seconds/year conversion
+  rename(gis_id = cach_id)
+
 
 ## Calculating loads from concentrations and discharges for small point sources
 df_small <- small_catch |>
@@ -376,13 +379,13 @@ df_raw_in <- df_ps |>
     .groups = "drop"
   )
 
-# # ## Balance check function
-# print("Big point sources")
-# check_balance(df_ps|> filter(year %in% yr_sel))
-# print("Small point sources")
-# check_balance(df_small_filled|> filter(year %in% yr_sel))
-# print("Joinned data")
-# check_balance(df_raw_in|> filter(year %in% yr_sel))
+# ## Balance check function
+print("Big point sources")
+check_balance(df_ps)
+print("Small point sources")
+check_balance(df_small)
+print("Joinned data")
+check_balance(df_raw_in)
 
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ## 8) Processed all data to compare --------------------------------------------
@@ -393,6 +396,7 @@ dt_in <- df_model_in |>
          ptot = solp + sedp) |>
   select(year, gis_id, flo, ntot, ptot)
 
+## Create point source name to gis_id link table
 ps_link <-  df_model_in |>
   select(name, gis_id, Subbasin, Setup_name) |>
   mutate(id = readr::parse_number(name)) |>
@@ -447,7 +451,7 @@ dt_all <- dt_in |>
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 ## Print the final sums
-yr_sel <- seq(2020, 2024)
+yr_sel <- seq(1997, 2019)
 print("Model input (*.rec files)")
 check_balance(filter(dt_in, year %in% yr_sel))
 print("Model output (recall_yr.txt files)")
@@ -456,3 +460,23 @@ print("Apportionment results (apportionment_detailed_basecase_YYYY.xlsx files)")
 check_balance(filter(dt_ap, year %in% yr_sel))
 print("Raw input data (monthly.txt and PostGress database)")
 check_balance(filter(dt_db, year %in% yr_sel))
+
+## Calculate relative differences and filter for significant discrepancies
+x <- dt_all |> select(ends_with(c("gis_id", "year", "_in", "_db"))) |>
+  select(
+    year, gis_id,
+    starts_with("flo"),
+    starts_with("ntot"),
+    starts_with("ptot")) |>
+  mutate(q = round(1 - (flo_in/flo_db), 2),
+         q = ifelse(is.infinite(q) | is.na(q), 0, q),
+         n = round(1 - (ntot_in/ntot_db), 2),
+         n = ifelse(is.infinite(n) | is.na(n), 0, n),
+         p = round(1 - (ptot_in/ptot_db), 2),
+         p = ifelse(is.infinite(p) | is.na(p), 0, p))
+
+
+xx <- x |>
+  filter(year < 2020) |>
+  filter(q != 0 | n != 0 | p != 0) |>
+  filter(q < 0.9 | n < 0.9 | p < 0.9)
