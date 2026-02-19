@@ -32,13 +32,13 @@ if (!requireNamespace("SWATreadR", quietly = TRUE)) {
 ## Path to the folder where LT SWAT system setups are stored
 setup_path <- "F:/Setup_20220708/Projects/Setup_2020_coarse/Watersheds/"
 
-sc_base <- "WFD_pressures_2020_2024_base"
+sc_base <- "sv_base"
 
 ## Data paths
 gis_path <- "Data/GIS/"
 
 ## Apportionment file name base, without the year part (_YYYY.xlsx)
-ap_name <- "apportionment_detailed_WFD_pressures_2020_2024_base"
+ap_name <- "apportionment_detailed_sv_base"
 
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ## 3) Reading GIS data----------------------------------------------------------
@@ -201,22 +201,20 @@ print(lt_con)
 
 ## Load reference tables
 ps_catchment <- load_table(lt_con, "point_sources", "ps_catchment")
-small_catch  <- load_table(lt_con, "point_sources", "small_up2024")
+small_catch  <- load_table(lt_con, "point_sources", "small_up2024_updated")
 
 ## Values taken from pointsource_utils.py
 fill_gaps <- data.frame(type = c(700,600,500,300,313,312,311,307,306,305,304,303,
                                  302,101,100,0,301,200,900,400,3130,3131),
-                        Ntot = c(1.2,1.2,0.8,1.9,1.7,2.0,2.1,1.9,1.2,2.2,2.2,
+                        NTOT = c(1.2,1.2,0.8,1.9,1.7,2.0,2.1,1.9,1.2,2.2,2.2,
                                    1.5,1.6,0.97,0.97,0.8,1.9,1.9,1.2,0.8,1.7,1.9),
                         NH4 = c(0.4,0.1,0.8,0.7,0.25,0.4,0.5,0.7,0.6,0.5,0.4,
                                   0.6,0.6,0.6,0.6,0.4,0.7,0.7,0.4,0.8,0.25,0.7),
                         NO3 = c(0.5,0.8,0.02,0.2,0.4,0.4,0.3,0.2,0.1,0.3,0.3,
                                   0.13,0.15,0.1,0.1,0.3,0.2,0.2,0.5,0.02,0.4,0.2),
-                        Ptot = c(0.3,0.3,0.2,0.16,0.2,0.5,0.4,0.4,0.3,0.4,0.4,
-                                   0.2,0.4,0.14,0.14,0.1,0.16,0.15,0.3,0.2,0.16,0.2))|>
-  mutate(PO4 = Ptot * 0.7) |>
-  pivot_longer(cols = -type, names_to = "nutrient",
-               values_to = "concentration_base")
+                        PTOT = c(0.3,0.3,0.2,0.16,0.2,0.5,0.4,0.4,0.3,0.4,0.4,
+                                   0.2,0.4,0.14,0.14,0.1,0.16,0.15,0.3,0.2,0.16,0.2),
+                        PO4 = 0.5)
 
 ##  Monthly SWAT point source file
 ps_monthly_path <- file.path(
@@ -289,49 +287,63 @@ df_small_flo <- small_catch[,c("year", "name", "type", "discharge", "y", "x", "c
 
 ## Calculating loads from concentrations and discharges for small point sources
 df_small <- small_catch |>
-  mutate(coord = paste0(x,"_",y)) |>
+  mutate(coord = paste0(x, "_", y)) |>
   select(name, coord, year, type, nutrient, concentration, discharge, cach_id) |>
-  left_join(fill_gaps, by = c("type", "nutrient")) |>
-  # Fill gaps only if concentration is NA or zero and there is a base value to fill with
-  mutate(concentration = ifelse((is.na(concentration) | concentration <= 0) &
-                                  !is.na(concentration_base) , concentration_base, concentration)) |>
-  select(-concentration_base) |>
-  mutate(concentration = ifelse(is.na(concentration) | concentration < 0, 0, concentration))
-
-## First aggregate by name, year, type, coord, cach_id, nutrient to get weighted mean concentration and total discharge
-df_agg <- df_small |>
-  group_by(name, year, type, coord, cach_id, nutrient) |>
+  # IMPORTANT: Add 'nutrient' here so you average NH4 with NH4, not NH4 with PTOT
+  group_by(year, coord, name, cach_id, type, discharge, nutrient) |>
   summarise(
-    concentration = weighted.mean(concentration, discharge, na.rm = TRUE),
-    discharge = sum(discharge, na.rm = TRUE),
-    type = first(type),
-    .groups = "drop"
+    concentration = mean(concentration, na.rm = TRUE),
+    .groups = "drop" # This silences the warning message
   ) |>
-  # Reshape to wide format to apply nutrient-specific rules
-  pivot_wider(
-    id_cols    = c(name, coord, year, type, cach_id, discharge),
-    names_from = nutrient,
-    values_from = concentration,
-    values_fill = 0
-  ) |>
-  mutate(PO4 = ifelse(PO4>Ptot, 0, PO4),
-         NO3 = ifelse(NO3>Ntot, 0, NO3),
-         NH4 = ifelse(NH4>Ntot, 0, NH4),
-         NO2 = ifelse(NO2>Ntot, 0, NO2),
-         NO3 = ifelse(NO3>Ntot - NH4 - NO2, 0, NO3),
-         NH4 = ifelse(NH4>Ntot - NO3 - NO2, 0, NH4),
-         NO2 = ifelse(NO2>Ntot - NO3 - NH4, 0, NO2)) |>
-  pivot_longer(cols = -c(name, coord, year, type, cach_id, discharge),
-               names_to = "nutrient",
-               values_to = "concentration") |>
-  ## Filling gaps again for all variables, which have not been in the database.
-  left_join(fill_gaps, by = c("type", "nutrient")) |>
-  mutate(concentration = ifelse(concentration == 0, concentration_base, concentration)) |>
-  select(-concentration_base) |>
-  mutate(concentration = ifelse(is.na(concentration) | concentration < 0, 0, concentration))
+  pivot_wider(names_from = nutrient, values_from = concentration)
+
+## Filling empty according to pointsource_utils.py
+df_filled <- df_small %>%
+  left_join(fill_gaps, by = "type", suffix = c("", "_coeff")) %>%
+  mutate(
+    # Step 1: "v" logic for NTOT (Fill from NH4 or NO3)
+    NTOT = ifelse(is.na(NTOT) | NTOT < 0.0001,
+                  pmax(NH4 / NH4_coeff, NO3 / NO3_coeff, na.rm = TRUE),
+                  NTOT),
+
+    # Step 2: "v" logic for PTOT (Fill from PO4 if missing)
+    PTOT = ifelse(is.na(PTOT) | PTOT < 0.0001,
+                  PO4 / PO4_coeff,
+                  PTOT),
+
+    # Step 3: "v" logic for BOD7 (The global Anchor)
+    # This captures the 'max(v1, v2)' behavior for BOD7 from either N or P
+    BOD7 = ifelse(is.na(BOD7) | BOD7 < 0.0001,
+                  pmax(NTOT / NTOT_coeff, PTOT / PTOT_coeff, na.rm = TRUE),
+                  BOD7),
+
+    # Step 4: Fill totals downwards from the Anchor (BOD7)
+    NTOT = ifelse(is.na(NTOT) | NTOT < 0.0001, BOD7 * NTOT_coeff, NTOT),
+    PTOT = ifelse(is.na(PTOT) | PTOT < 0.0001, BOD7 * PTOT_coeff, PTOT),
+
+    # Step 5: Fill specific species downwards
+    NH4 = ifelse(is.na(NH4) | NH4 < 0.0001, NTOT * NH4_coeff, NH4),
+    NO3 = ifelse(is.na(NO3) | NO3 < 0.0001, NTOT * NO3_coeff, NO3),
+    PO4 = ifelse(is.na(PO4) | PO4 < 0.0001, PTOT * PO4_coeff, PO4),
+
+    # Step 6: Consistency Checks (Trust the components over the totals)
+    NTOT = ifelse(NTOT <= NH4 | NTOT <= NO3,
+                  pmax(NH4 / NH4_coeff, NO3 / NO3_coeff, na.rm = TRUE),
+                  NTOT),
+    PTOT = ifelse(PTOT <= PO4, PO4 / PO4_coeff, PTOT),
+
+    # Step 7: Calculate Organic fractions (NORG/PORG)
+    NORG = pmax(NTOT - (replace_na(NH4, 0) + replace_na(NO2, 0) + replace_na(NO3, 0)), 0),
+    PORG = pmax(PTOT - replace_na(PO4, 0), 0),
+    across(c(NTOT, PTOT, NH4, NO3, PO4, BOD7, SS, NO2), ~tidyr::replace_na(.x, 0)))|>
+  select(-ends_with("_coeff"))|>
+  pivot_longer(
+    cols = c(NTOT, PTOT, NH4, NO3, PO4, BOD7, SS, NO2, NORG, PORG), # Include all nutrient columns
+    names_to = "nutrient",
+    values_to = "concentration")
 
 ## Preparing loads for small point sources, applying nutrient-specific rules and filling gaps as needed
-df_small_filled <- df_agg |>
+df_small_filled <- df_filled |>
   select(year, nutrient, concentration, discharge, cach_id) |>
   mutate(
     load = concentration * discharge  # seconds/year conversion
@@ -351,11 +363,9 @@ df_small_filled <- df_agg |>
   ) |>
   select(-BOD7) |>
   setNames(c(
-    "year", "gis_id", "nh3", "no2", "no3",
-    "ntot", "solp", "ptot", "sed", "cbod"
+    "year", "gis_id", "nh3", "no2", "no3", "orgn",
+    "ntot", "solp", "sedp", "ptot", "sed", "cbod"
   )) |>
-  mutate(orgn = ntot - (no3 + no2 + nh3),
-         sedp = ptot - solp) |>
   left_join(
     df_small_flo,
     by = c("year", "gis_id")
@@ -451,7 +461,7 @@ dt_all <- dt_in |>
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 ## Print the final sums
-yr_sel <- seq(1997, 2019)
+yr_sel <- seq(2017, 2024)
 print("Model input (*.rec files)")
 check_balance(filter(dt_in, year %in% yr_sel))
 print("Model output (recall_yr.txt files)")
@@ -459,10 +469,11 @@ check_balance(filter(dt_out, year %in% yr_sel))
 print("Apportionment results (apportionment_detailed_basecase_YYYY.xlsx files)")
 check_balance(filter(dt_ap, year %in% yr_sel))
 print("Raw input data (monthly.txt and PostGress database)")
-check_balance(filter(dt_db, year %in% yr_sel))
+check_balance(filter(dt_db, !is.na(gis_id) & year %in% yr_sel))
 
 ## Calculate relative differences and filter for significant discrepancies
-x <- dt_all |> select(ends_with(c("gis_id", "year", "_in", "_db"))) |>
+diff_calculated <- dt_all |> select(ends_with(c("gis_id", "year", "_in", "_db"))) |>
+  filter(!is.na(gis_id)) |>
   select(
     year, gis_id,
     starts_with("flo"),
@@ -475,8 +486,7 @@ x <- dt_all |> select(ends_with(c("gis_id", "year", "_in", "_db"))) |>
          p = round(1 - (ptot_in/ptot_db), 2),
          p = ifelse(is.infinite(p) | is.na(p), 0, p))
 
-
-xx <- x |>
-  filter(year < 2020) |>
+diff_sel <- diff_calculated |>
+  filter(year >= 2017 & year <= 2024) |>
   filter(q != 0 | n != 0 | p != 0) |>
-  filter(q < 0.9 | n < 0.9 | p < 0.9)
+  filter((q > 0.1 & q <= 1) | (n > 0.1 & n <= 1) | (p > 0.1 & p <= 1))
