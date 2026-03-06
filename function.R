@@ -1,3 +1,28 @@
+# Function to read SWAT output files, compute concentrations, and aggregate by month and unit
+read_model <- function(f_path, sc_name, subb, setup) {
+  dt <- as.data.table(SWATreadR::read_swat(f_path))
+  dt[, year_month := sprintf("%04d-%02d", yr, mon)]
+  # Compute concentrations
+  dt[, tn_conc := ifelse(flo_out == 0, NA_real_,
+                         ((orgn_out + nh3_out + no3_out + no2_out)*1e6)/(flo_out*86400*1000))]
+  dt[, tp_conc := ifelse(flo_out == 0, NA_real_,
+                         ((sedp_out + solp_out)*1e6)/(flo_out*86400*1000))]
+  # Add identifiers once
+  dt[, `:=`(
+    Subbasin = subb,
+    Setup_name = setup,
+    Scenario = sc_name
+  )]
+  # Keep only necessary columns
+  dt <- dt[, .(unit, year_month, flo_out, tn_conc, tp_conc,
+               Subbasin, Setup_name, Scenario)]
+  # Ultra-fast aggregation
+  dt <- dt[, lapply(.SD, mean, na.rm = TRUE),
+           by = .(unit, year_month, Subbasin, Setup_name, Scenario)]
+
+  return(dt)
+}
+
 # Funtion for loading tables
 load_table <- function(con, schema, table, exclude_geom = FALSE) {
   # Input validation

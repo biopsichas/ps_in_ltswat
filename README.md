@@ -16,7 +16,7 @@ The purpose of this toolbox is to **automate the integration of point source pol
 ### Key Features
 1.  **Quality Assurance (QA)**: The `ps_qa.R` script is used for data validation and integrity checks to ensure point source datasets are  correctly represented in LRMS.
 2.  **Impact Analysis**: `ps_impacts.R` calculates pollutant loads and evaluates their specific impacts on the water bodies (WB).
-3.  **Risk Assessment**: `risk_wb_ps.R` identifies risk WBs comparing *base* and *change* scenarios. 
+3.  **Risk Assessment**: `ps_risk_wb.R` identifies risk WBs comparing *base* and *change* scenarios. 
 4.  **Modular Functions**: Core logic and shared utilities are maintained in `function.R` to ensure consistency across different analysis steps.
 
 ### Repository Structure
@@ -26,7 +26,7 @@ LT-SWAT-PS-Processing/
 ├── function.R           # Collection of custom R functions used across scripts
 ├── ps_impacts.R         # Script for assessing environmental impacts of point sources
 ├── ps_qa.R              # Quality assurance and data cleaning for point source datasets
-├── risk_wb_ps.R         # Water body risk assessment based on point source loads
+├── ps_risk_wb.R         # Water body risk assessment based on point source loads
 ├── update_small.R       # Utility script for updating small point source datasets
 ├── .Renviron            # Environment variables configuration (e.g., Postgres database connection)
 ├── ps_in_ltswat.Rproj   # RStudio project file for the LT-SWAT PS processing workflow
@@ -52,7 +52,7 @@ LT-SWAT-PS-Processing/
 4.  **Load Functions**: Source `function.R` to load the necessary utilities for the project.
 5.  **Run Scripts**:
     *   Execute `ps_qa.R` to validate your data.
-    *   Execute `ps_impacts.R` or `risk_wb_ps.R` to generate model inputs and risk reports.
+    *   Execute `ps_impacts.R` or `ps_risk_wb.R` to generate model inputs and risk reports.
 
 ## Acknowledgments
 
