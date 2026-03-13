@@ -68,5 +68,15 @@ df <- rbindlist(Filter(Negate(is.null), results), use.names = TRUE)
 ##Close parallel workers
 plan(sequential)
 
-saveRDS(df, "Data/ps_assessment.rds")
+##------------------------------------------------------------------------------
+## 4) Reading SWAT reservoir files (needed for the retention calculation)
+##------------------------------------------------------------------------------
+
+# Pre-generate all file paths (Vectorized)
+f_paths <- paste0(setup_path, sstable$Subbasin, "/", sstable$Setup_name,
+                  "/", sc_zero, "/hydrology.res")
+
+# Use lapply to read files that exist and combine results
+res <- lapply(f_paths, function(path) {if (file.exists(path)) read_res(path)
+  else NULL}) |> rbindlist()
 

@@ -23,6 +23,17 @@ read_model <- function(f_path, sc_name, subb, setup) {
   return(dt)
 }
 
+# Function to read reservoirs SWAT files and combine with reservoir.con for GIS ID
+read_res <- function(f_path) {
+  dt_res <- as.data.table(SWATreadR::read_swat(f_path))|>
+    select(name, area_ps, vol_ps, area_es, vol_es)
+
+  as.data.table(SWATreadR::read_swat(sub("hydrology\\.res$", "reservoir.con", f_path))) |>
+    select(name, gis_id) |>
+    left_join(dt_res, by = "name") |>
+    select(gis_id, everything())
+}
+
 # Funtion for loading tables
 load_table <- function(con, schema, table, exclude_geom = FALSE) {
   # Input validation
