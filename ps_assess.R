@@ -77,12 +77,52 @@ results <- future_lapply(all_tasks, function(task) {
   read_model(task$base, "base",   task$subb, task$setup)
 })
 
-df <- rbindlist(Filter(Negate(is.null), results), use.names = TRUE)
+df_mod <- rbindlist(Filter(Negate(is.null), results), use.names = TRUE)
 ##Close parallel workers
 plan(sequential)
 
-# saveRDS(df, "test/ps_assessment.rds")
-df_mod <- readRDS("test/ps_assessment.rds") |>
+##------------------------------------------------------------------------------
+## 5) Reading SWAT reservoir files (needed for the retention calculation)
+##------------------------------------------------------------------------------
+
+# ## Saving the information from reservoir files
+# # Pre-generate all file paths (Vectorized)
+# f_paths <- paste0(setup_path, sstable$Subbasin, "/", sstable$Setup_name,
+#                   "/", sc_zero, "/hydrology.res")
+#
+# # Use lapply to read files that exist and combine results
+# res <- lapply(f_paths, function(path) {if (file.exists(path)) read_res(path)
+#   else NULL}) |> rbindlist()
+# saveRDS(res, "test/res.rds")
+
+plan(multisession, workers = 15)
+
+# Build list of paths first
+all_tasks <- lapply(seq_len(nrow(sstable)), function(i) {
+  list(
+    base  = paste0(setup_path, sstable$Subbasin[i], "/", sstable$Setup_name[i],
+                   "/", sc_zero, "/reservoir_day.txt"),
+    subb  = sstable$Subbasin[i],
+    setup = sstable$Setup_name[i]
+  )
+})
+
+## Run in parallel:
+results <- future_lapply(all_tasks, function(task) {
+  if (!file.exists(task$base)) return(NULL)
+  read_res2(task$base, task$subb, task$setup)
+})
+
+df_res <- rbindlist(Filter(Negate(is.null), results), use.names = TRUE)
+# saveRDS(df_res, "test/res_assessment2.rds")
+##Close parallel workers
+plan(sequential)
+
+##------------------------------------------------------------------------------
+## 6) Cleaning all the information
+##------------------------------------------------------------------------------
+
+df_mod <- df_mod |>
   left_join(basins |> st_drop_geometry(), by =c("unit" = "GRIDCODE", "Subbasin", "Setup_name")) |>
   select(cach_id, flo_out, tn_conc, tp_conc) |>
   group_by(cach_id) |>
@@ -90,7 +130,7 @@ df_mod <- readRDS("test/ps_assessment.rds") |>
   right_join(basins[c("cach_id")] |> st_drop_geometry(), by = "cach_id") |>
   replace_na(list(flo_out = 0, tn_conc = 0, tp_conc = 0))
 
-df_res <- readRDS("test/res_assessment2.rds")|>
+df_res <- df_res |>
   left_join(basins |> st_drop_geometry(), by =c("unit" = "GRIDCODE", "Subbasin", "Setup_name")) |>
   select(cach_id, year_month, flo_stor, flo_out, tn_in, tn_out, tp_in, tp_out) |>
   select(-year_month) |>
@@ -119,9 +159,14 @@ df_ps <- read.csv("point_source_loads.csv", check.names = FALSE) |>
   ) |>
   replace_na(list(TN = 0, TP = 0))
 
+## Converting GIS files for the leaflet
+basins_4326 <- st_transform(basins, 4326)
+segments_4326 <- st_read(paste0(gis_path, "segments_coarse.shp"), quiet = T) |>
+  st_transform(4326)
+ps_info <- readRDS("Data/ps_sf_info.rds")
 
 ##------------------------------------------------------------------------------
-## 6) Reading SWAT output files and calculating concentration in parallel
+## 7) MAIN PART: Building the river map with all the information, starting from upstream and moving downstream
 ##------------------------------------------------------------------------------
 
 # 1. Prepare info table
@@ -290,46 +335,12 @@ while(length(to_do_ids) > 0) {
   }
 }
 
+# saveRDS(river_map, "test/river_map.rds")
+
 ##------------------------------------------------------------------------------
-## 7) Adding retention at reservoirs and lakes
+## 8) Preparing the data for presentation (rounding, calculating shares, etc.)
 ##------------------------------------------------------------------------------
 
-
-## Plot retention vs WRT
-# ggplot(df_res |>
-#          select(cach_id, l_retN, l_retP) |>
-#          pivot_longer(cols = c(l_retN, l_retP), names_to = "nutrient", values_to = "retention"), aes(x = nutrient, y = retention, fill = nutrient)) +
-#   geom_boxplot()+
-#   labs(title = "Nutrient Retention vs WRT", x = "WRT (days)", y = "Nutrient Retention") +
-#   theme_minimal()
-#
-# ggplot(df_res |> filter(wrt_days < 1000), aes(x = wrt_days, y = l_retP)) +
-#   geom_point(alpha = 0.4) +
-#   geom_smooth(method = "nls",
-#               formula = y ~ a * x^b,
-#               method.args = list(start = list(a = 0.1, b = 0.5)),
-#               se = FALSE, color = "red", linewidth = 1.2) +
-#   labs(title = "Phosphorus Retention vs WRT",
-#        x = "WRT (days)",
-#        y = "Phosphorus Retention")
-#
-# ggplot(df_res |> filter(wrt_days < 1000), aes(x = wrt_days, y = l_retN)) +
-#   geom_point(alpha = 0.4) +
-#   geom_smooth(method = "nls",
-#               formula = y ~ a * x^b,
-#               method.args = list(start = list(a = 0.1, b = 0.5)),
-#               se = FALSE, color = "red", linewidth = 1.2) +
-#   labs(title = "Nitrogen Retention vs WRT (Exponential Fit)",
-#        x = "WRT (days)",
-#        y = "Nitrogen Retention")
-
-
-basins_4326 <- st_transform(basins, 4326)
-segments_4326 <- st_read(paste0(gis_path, "segments_coarse.shp"), quiet = T) |>
-  st_transform(4326)
-ps_info <- readRDS("Data/ps_sf_info.rds")
-# river_map0 <- river_map
-# river_map <- river_map0
 for(id in names(river_map)){
   river_map[[id]]$inflow <- river_map[[id]]$inflow |>
     mutate(area = round(area/1000000, 1),
@@ -352,5 +363,4 @@ for(id in names(river_map)){
            TN_conc_added = round(TN_conc_added, 3),
            TP_conc_added = round(TP_conc_added, 3))
 }
-
 
