@@ -104,6 +104,24 @@ pnt_sf <-   st_join(pnt_df["code"] %>% unique, basins, left = TRUE) %>%
     . <- .[!is.na(.$Subbasin), ]
   }
 
+## This is the table that will be saved for future use. It is needed for the ps_asses.R script,
+# so it is saved as an RDS file.
+pnt_df_save <- pnt_df %>%
+  select(code, name, wastewater_volume, pollutant_name, load, geometry) |>
+  filter(pollutant_name %in% c("Bendrasis azotas", "Bendrasis fosforas")) |>
+  mutate(pollutant_name = ifelse(pollutant_name == "Bendrasis azotas", "TN", "TP")) |>
+  pivot_wider(
+    names_from = pollutant_name,
+    values_from = load
+  ) |>
+  st_transform(4326) |>
+  setNames(c("ps_code", "name", "volume", "geometry", "TN", "TP")) |>
+  mutate_at(vars(volume, TN, TP), ~replace_na(., 0)) |>
+  mutate_at(vars(volume, TN, TP), ~round(., 1)) |>
+  inner_join(pnt_sf[,c("code", "cach_id")], by = c("ps_code" = "code")) |>
+  select(ps_code, cach_id, name, volume, TN, TP, geometry)
+saveRDS(pnt_df_save, file = "Data/ps_sf_info.rds")
+
 ## Joining point source data with basin information
 pst_info <- pnt_df %>%
   st_drop_geometry %>%
