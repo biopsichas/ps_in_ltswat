@@ -35,7 +35,7 @@ read_res <- function(f_path) {
 }
 
 # Function to read SWAT output files, compute concentrations, and aggregate by month and unit
-read_res <- function(f_path, subb, setup) {
+read_res2 <- function(f_path, subb, setup) {
   dt <- as.data.table(SWATreadR::read_swat(f_path))
   dt[, year_month := sprintf("%04d-%02d", yr, mon)]
   # Add identifiers once

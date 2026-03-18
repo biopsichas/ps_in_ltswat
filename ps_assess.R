@@ -144,7 +144,9 @@ df_res <- df_res |>
   select(cach_id, wrt_days, l_retN, l_retP) |>
   replace_na(list(wrt_days = 0, l_retN = 0, l_retP = 0))
 
-df_ps <- read.csv("point_source_loads.csv", check.names = FALSE) |>
+df_ps <- read.csv("point_source_loads.csv",
+                  check.names = FALSE,
+                  fileEncoding = "UTF-8")|>
   select(c("Išleistuvo kodas", "Teršalo pavadinimas", "Tiesioginis VT cach_id",  "Teršalo kiekis išleidžiamose nuotekose (kg/metus)")) |>
   filter(`Teršalo pavadinimas` %in% c("Bendrasis azotas", "Bendrasis fosforas")) |>
   setNames(c("ps_code", "populant", "cach_id", "load_kg_per_year")) |>
