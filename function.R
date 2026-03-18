@@ -34,6 +34,29 @@ read_res <- function(f_path) {
     select(gis_id, everything())
 }
 
+# Function to read SWAT output files, compute concentrations, and aggregate by month and unit
+read_res <- function(f_path, subb, setup) {
+  dt <- as.data.table(SWATreadR::read_swat(f_path))
+  dt[, year_month := sprintf("%04d-%02d", yr, mon)]
+  # Add identifiers once
+  dt[, `:=`(
+    Subbasin = subb,
+    Setup_name = setup
+  )]
+  dt[, tn_in := orgn_in + nh3_in + no3_in + no2_in]
+  dt[, tp_in := sedp_in + solp_in]
+  dt[, tn_out := orgn_out + nh3_out + no3_out + no2_out]
+  dt[, tp_out := sedp_out + solp_out]
+
+  # Keep only necessary columns
+  dt <- dt[, .(unit, year_month, flo_stor, flo_out, tn_in, tn_out, tp_in, tp_out, Subbasin, Setup_name)]
+  # Ultra-fast aggregation
+  dt <- dt[, lapply(.SD, mean, na.rm = TRUE),
+           by = .(unit, year_month, Subbasin, Setup_name)]
+
+  return(dt)
+}
+
 # Funtion for loading tables
 load_table <- function(con, schema, table, exclude_geom = FALSE) {
   # Input validation

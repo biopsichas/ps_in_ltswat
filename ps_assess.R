@@ -69,7 +69,7 @@ df <- rbindlist(Filter(Negate(is.null), results), use.names = TRUE)
 plan(sequential)
 
 ##------------------------------------------------------------------------------
-## 4) Reading SWAT reservoir files (needed for the retention calculation)
+## 5) Reading SWAT reservoir files (needed for the retention calculation)
 ##------------------------------------------------------------------------------
 
 # Pre-generate all file paths (Vectorized)
@@ -79,4 +79,27 @@ f_paths <- paste0(setup_path, sstable$Subbasin, "/", sstable$Setup_name,
 # Use lapply to read files that exist and combine results
 res <- lapply(f_paths, function(path) {if (file.exists(path)) read_res(path)
   else NULL}) |> rbindlist()
+# saveRDS(res, "test/res.rds")
 
+plan(multisession, workers = 15)
+
+# Build list of paths first
+all_tasks <- lapply(seq_len(nrow(sstable)), function(i) {
+  list(
+    base  = paste0(setup_path, sstable$Subbasin[i], "/", sstable$Setup_name[i],
+                   "/", sc_zero, "/reservoir_day.txt"),
+    subb  = sstable$Subbasin[i],
+    setup = sstable$Setup_name[i]
+  )
+})
+
+## Run in parallel:
+results <- future_lapply(all_tasks, function(task) {
+  if (!file.exists(task$base)) return(NULL)
+  read_res2(task$base, task$subb, task$setup)
+})
+
+df_res <- rbindlist(Filter(Negate(is.null), results), use.names = TRUE)
+##Close parallel workers
+plan(sequential)
+# saveRDS(df_res, "test/res_assessment2.rds")
