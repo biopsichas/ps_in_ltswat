@@ -1,6 +1,6 @@
-##------------------------------------------------------------------------------
-## 1) Loading required libraries
-##------------------------------------------------------------------------------
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+## 1) Loading required libraries ----
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 library(tidyverse)
 library(lubridate)
@@ -8,141 +8,244 @@ library(data.table)
 library(sf)
 library(future.apply)
 library(future)
+library(openxlsx)
 if (!requireNamespace("SWATreadR", quietly = TRUE)) {
   devtools::install_github("chrisschuerz/SWATreadR")
 }
 # Source custom functions
 source("function.R")
 
-##------------------------------------------------------------------------------
-## 2) Setting parameters to select and data paths
-##------------------------------------------------------------------------------
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+## 2) Setting parameters to select and data paths ----
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+## Read model if TRUE, otherwise read from RDS (saved results)
+read_model_files <- FALSE
+
+## Temp folder for saving model outputs
+temp_folder <- "Temp"
 
 ## Path to the folder where LT SWAT system setups are stored
 setup_path <- "E:/LIFE_AAA/swat_lt/Projects/Setup_2020_coarse/Watersheds/"
 
+## Subdirectory names for the scenario to be used for the assessment
 sc_zero <- "point_zero"
 
 ## Data paths
-gis_path <- "Data/GIS/"
+data_path <- "Data/"
+
+## GIS data
+gis_path <- paste0(data_path, "GIS/")
+## Point source loads
+
+## Water body to cach_id relationship, and problematic water bodies that need
+## to be checked manually
+wb_rel <- paste0(data_path, "WB_representative_SWAT_segments_final.xlsx")
+
+## Point source loads
+ps_data <- paste0(data_path, "PS/")
 
 ## Retention coefficients for rivers (per %/km)
 river_N_retention <- 0.00024
 river_P_retention <- 0.00045
 
-##------------------------------------------------------------------------------
-## 3) Reading data
-##------------------------------------------------------------------------------
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+## 3) Reading data ----
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 ## Read basin shapefile
-basins <- st_read(dsn = paste0(gis_path,"basin.gdb"), layer = "basin",
-                  quiet = T) %>%
+basins_sf <- st_read(dsn = paste0(gis_path,"basin.gdb"), layer = "basin",
+                     quiet = T) |>
   select(c("cach_id","Subbasin","Setup_name", "GRIDCODE"))
 
+## Create a simplified table for easier joins later on
+basins <- basins_sf |> st_drop_geometry() |>
+  select(cach_id, Subbasin, Setup_name, GRIDCODE)
+
 ## Read reaches shae file
-segments <- st_read(paste0(gis_path, "segments_coarse.shp"), quiet = T) %>%
-  st_drop_geometry
+segments_sf <- st_read(paste0(gis_path, "segments_coarse.shp"), quiet = T)
 
 ## Preparing Subbasin Setup_name table
-sstable <- basins %>% st_drop_geometry %>% select(Subbasin, Setup_name) %>% unique
+sstable <- basins_sf %>% st_drop_geometry %>% select(Subbasin, Setup_name) %>%
+  unique
 
 ## Reading tables
-transfer <- read.csv("Data/transfers.csv", header = F) [,-1]|>
+## Transfers table: This table contains information about water transfers between
+## catchments, which can affect the flow and pollutant loads in the river network.
+transfer <- read.csv(paste0(data_path, "transfers.csv"),
+                     header = FALSE,
+                     fileEncoding = "UTF-8") [,-1]|>
   setNames(c("id", "name", "outletid", "flowto", "multiplier")) |>
   select(name, outletid, flowto, multiplier)
+
+## Catchment coarse info: This table contains information about the catchments,
+## such as their type, area, and flow relationships. This information is crucial
+## for understanding the characteristics of each catchment and how they contribute
+## to the overall river network (catchments_coarse layer attributes).
 
 catch_coarse_info <- read.csv("Data/catchment_coarse.csv", header = F) |>
   setNames(c("id", "type", "segmentid", "lakegid", "kadastroid", "kadastroid_lake",
              "flow_to", "segmentto", "outletid", "area", "addedarea", "inflowarea"))
 
-##------------------------------------------------------------------------------
-## 4) Reading SWAT output files and calculating concentration in parallel
-##------------------------------------------------------------------------------
+## Reading the relationship between water bodies and catchment IDs, as well as a list
+## of problematic water bodies that need to be checked manually.
+wb_to_cach_id <- read.xlsx(wb_rel, sheet = "cach_id_to_wb")
+wb_problematic <- read.xlsx(wb_rel, sheet = "problem_wb")
 
-plan(multisession, workers = 15)
+## Reading point source loads: This dataset contains information about
+## the pollutant loads from point sources (e.g., wastewater treatment plants,
+## industrial discharges) into the river network. Reading is done into the list
+## form the ps_data folder, where each file corresponds
+## to a different point source scenario.
 
-# Build list of paths first
-all_tasks <- lapply(seq_len(nrow(sstable)), function(i) {
-  list(
-    base  = paste0(setup_path, sstable$Subbasin[i], "/", sstable$Setup_name[i],
-                   "/", sc_zero, "/channel_sd_day.txt"),
-    subb  = sstable$Subbasin[i],
-    setup = sstable$Setup_name[i]
-  )
-})
+## List all files in the point source data folder
+ps_files <- list.files(ps_data, pattern = "\\.xlsx$", full.names = TRUE)
+ps_files
 
-## Run in parallel:
-results <- future_lapply(all_tasks, function(task) {
-  if (!file.exists(task$base)) return(NULL)
-  read_model(task$base, "base",   task$subb, task$setup)
-})
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+## 4) Reading SWAT output files and calculating concentration in parallel ----
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-df_mod <- rbindlist(Filter(Negate(is.null), results), use.names = TRUE)
-##Close parallel workers
-plan(sequential)
+if(read_model_files){
+  ## Define parallel plan
+  # Note: Ensure 'workers' doesn't exceed your physical cores to avoid overhead
+  plan(multisession, workers = 15)
 
-##------------------------------------------------------------------------------
-## 5) Reading SWAT reservoir files (needed for the retention calculation)
-##------------------------------------------------------------------------------
+  # Build list of paths first
+  all_tasks <- lapply(seq_len(nrow(sstable)), function(i) {
+    list(
+      base  = paste0(setup_path, sstable$Subbasin[i], "/", sstable$Setup_name[i],
+                     "/", sc_zero, "/channel_sd_day.txt"),
+      subb  = sstable$Subbasin[i],
+      setup = sstable$Setup_name[i]
+    )
+  })
 
-# ## Saving the information from reservoir files
-# # Pre-generate all file paths (Vectorized)
-# f_paths <- paste0(setup_path, sstable$Subbasin, "/", sstable$Setup_name,
-#                   "/", sc_zero, "/hydrology.res")
-#
-# # Use lapply to read files that exist and combine results
-# res <- lapply(f_paths, function(path) {if (file.exists(path)) read_res(path)
-#   else NULL}) |> rbindlist()
-# saveRDS(res, "test/res.rds")
+  ## Run in parallel:
+  results <- future_lapply(all_tasks, function(task) {
+    if (!file.exists(task$base)) return(NULL)
+    # Assuming read_model is a custom function you've defined elsewhere
+    read_model(task$base, "base", task$subb, task$setup)
+  })
 
-plan(multisession, workers = 15)
+  ## Combine results, filtering out any NULLs
+  df_mod <- rbindlist(Filter(Negate(is.null), results), use.names = TRUE)
 
-# Build list of paths first
-all_tasks <- lapply(seq_len(nrow(sstable)), function(i) {
-  list(
-    base  = paste0(setup_path, sstable$Subbasin[i], "/", sstable$Setup_name[i],
-                   "/", sc_zero, "/reservoir_day.txt"),
-    subb  = sstable$Subbasin[i],
-    setup = sstable$Setup_name[i]
-  )
-})
+  ## Close parallel workers
+  plan(sequential)
 
-## Run in parallel:
-results <- future_lapply(all_tasks, function(task) {
-  if (!file.exists(task$base)) return(NULL)
-  read_res2(task$base, task$subb, task$setup)
-})
+  ## --- Save to temp_folder .rds file ---
 
-df_res <- rbindlist(Filter(Negate(is.null), results), use.names = TRUE)
-# saveRDS(df_res, "test/res_assessment2.rds")
-##Close parallel workers
-plan(sequential)
+  # 1. Manage the directory
+  if (dir.exists(temp_folder)) {
+    unlink(temp_folder, recursive = TRUE) # Delete existing folder
+  }
+  dir.create(temp_folder, recursive = TRUE) # Create fresh folder
 
-##------------------------------------------------------------------------------
-## 6) Cleaning all the information
-##------------------------------------------------------------------------------
+  # 2. Save the result
+  saveRDS(df_mod, file = file.path(temp_folder, "df_mod.rds"))
 
-df_mod <- df_mod |>
-  left_join(basins |> st_drop_geometry(), by =c("unit" = "GRIDCODE", "Subbasin", "Setup_name")) |>
+  message("Model files processed and saved to: ", temp_folder)
+} else {
+  ## If not reading raw files, load the previously saved .rds data
+  processed_file <- file.path(temp_folder, "df_mod.rds")
+
+  if (file.exists(processed_file)) {
+    message("Loading previously processed model data from: ", processed_file)
+    df_mod <- readRDS(processed_file)
+  } else {
+    stop("The processed file 'df_mod.rds' was not found in ", temp_folder,
+         ". Please set read_model_files = TRUE to generate it.")
+  }
+}
+
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+## 5) Reading SWAT reservoir files (needed for the retention calculation) ----
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+if(read_model_files){
+  ## Define parallel plan
+  plan(multisession, workers = 15)
+
+  # Build list of paths first
+  all_tasks <- lapply(seq_len(nrow(sstable)), function(i) {
+    list(
+      base  = paste0(setup_path, sstable$Subbasin[i], "/", sstable$Setup_name[i],
+                     "/", sc_zero, "/reservoir_day.txt"),
+      subb  = sstable$Subbasin[i],
+      setup = sstable$Setup_name[i]
+    )
+  })
+
+  ## Run in parallel:
+  results <- future_lapply(all_tasks, function(task) {
+    if (!file.exists(task$base)) return(NULL)
+    read_res2(task$base, task$subb, task$setup)
+  })
+
+  ## Combine results, filtering out any NULLs
+  df_res <- rbindlist(Filter(Negate(is.null), results), use.names = TRUE)
+
+  ## Close parallel workers
+  plan(sequential)
+
+  ## --- Save to temp_folder ---
+  # Ensure the directory exists (keeping existing folder if created by previous block)
+  if (!dir.exists(temp_folder)) {
+    dir.create(temp_folder, recursive = TRUE)
+  }
+
+  saveRDS(df_res, file = file.path(temp_folder, "df_res.rds"))
+  message("Reservoir files processed and saved.")
+
+} else {
+  ## Load the previously saved reservoir data
+  res_file <- file.path(temp_folder, "df_res.rds")
+
+  if (file.exists(res_file)) {
+    df_res <- readRDS(res_file)
+    message("Loaded cached reservoir data from: ", res_file)
+  } else {
+    stop("The file 'df_res.rds' is missing. Please set read_model_files = TRUE.")
+  }
+}
+
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+## 6) Cleaning all the information ----
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+## Cleaning and summarizing model output data
+df_mod_cl <- df_mod |>
+  left_join(basins,
+            by = c("unit" = "GRIDCODE", "Subbasin", "Setup_name")) |>
   select(cach_id, flo_out, tn_conc, tp_conc) |>
   group_by(cach_id) |>
-  summarise_all(mean, na.rm = TRUE) |>
-  right_join(basins[c("cach_id")] |> st_drop_geometry(), by = "cach_id") |>
-  replace_na(list(flo_out = 0, tn_conc = 0, tp_conc = 0))
+  summarise(across(c(flo_out, tn_conc, tp_conc), \(x) mean(x, na.rm = TRUE)),
+            .groups = "drop") |>
+  # Ensure all IDs are present
+  right_join(basins |> select(cach_id), by = "cach_id") |>
+  # Efficiently replace NAs
+  mutate(across(c(flo_out, tn_conc, tp_conc), ~ replace_na(.x, 0)))
 
-df_res <- df_res |>
-  left_join(basins |> st_drop_geometry(), by =c("unit" = "GRIDCODE", "Subbasin", "Setup_name")) |>
-  select(cach_id, year_month, flo_stor, flo_out, tn_in, tn_out, tp_in, tp_out) |>
-  select(-year_month) |>
+## Cleaning and summarizing reservoir data
+df_res_cl <- df_res |>
+  left_join(basins, by = c("unit" = "GRIDCODE", "Subbasin", "Setup_name")) |>
+  select(cach_id, flo_stor, flo_out, tn_in, tn_out, tp_in, tp_out) |>
   group_by(cach_id) |>
-  summarise_all(mean, na.rm = TRUE) |>
-  mutate(wrt_days = ifelse(flo_out > 0, flo_stor/ flo_out, 0),#Calculate WRT in days based on average volume|>
-         l_retN = 1 - (tn_out/tn_in),
-         l_retP = 1 - (tp_out/tp_in),
-         l_retN = ifelse(l_retN < 0, 0, l_retN)) |> # Set negative retention to 0
-  right_join(basins[c("cach_id")] |> st_drop_geometry(), by = "cach_id") |>
+  summarise(across(everything(), \(x) mean(x, na.rm = TRUE)), .groups = "drop") |>
+  # Calculate metrics on the averaged values
+  mutate(
+    wrt_days = if_else(flo_out > 0, flo_stor / flo_out, 0),
+    l_retN   = pmax(0, 1 - (tn_out / tn_in)), # pmax is faster/cleaner for clamping to 0
+    l_retP   = 1 - (tp_out / tp_in)
+  ) |>
+  # Final alignment with the full basin list
+  right_join(basins |> select(cach_id), by = "cach_id") |>
   select(cach_id, wrt_days, l_retN, l_retP) |>
-  replace_na(list(wrt_days = 0, l_retN = 0, l_retP = 0))
+  # Clean up NAs
+  mutate(across(c(wrt_days, l_retN, l_retP), ~ replace_na(.x, 0)))
+
+
 
 df_ps <- read.csv("point_source_loads.csv",
                   check.names = FALSE,
@@ -167,9 +270,24 @@ segments_4326 <- st_read(paste0(gis_path, "segments_coarse.shp"), quiet = T) |>
   st_transform(4326)
 ps_info <- readRDS("Data/ps_sf_info.rds")
 
-##------------------------------------------------------------------------------
-## 7) MAIN PART: Building the river map with all the information, starting from upstream and moving downstream
-##------------------------------------------------------------------------------
+
+
+ps_template <- ps_info |>
+  st_transform(3346) |>
+  mutate(X = st_coordinates(geometry)[,1],
+         Y = st_coordinates(geometry)[,2]) |>
+  st_drop_geometry() |>
+  select(-cach_id) |>
+  setNames(c("Išleistuvo kodas", "Pavadinimas", "Nuotėkų kiekis 1000 m3/metus", "Bendrasis azotas (kg/metus)", "Bendrasis fosforas (kg/metus)", "X", "Y"))
+
+## Same into excel file for manual checking
+library(openxlsx)
+write.xlsx(ps_template, "test/ps_template.xlsx", rowNames = FALSE)
+
+
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+## 7) MAIN PART: Building the river map with all the information. ----
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 # 1. Prepare info table
 basins_info <- basins |>
@@ -337,11 +455,10 @@ while(length(to_do_ids) > 0) {
   }
 }
 
-# saveRDS(river_map, "test/river_map.rds")
 
-##------------------------------------------------------------------------------
-## 8) Preparing the data for presentation (rounding, calculating shares, etc.)
-##------------------------------------------------------------------------------
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+## 8) Preparing the data for presentation ----
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 for(id in names(river_map)){
   river_map[[id]]$inflow <- river_map[[id]]$inflow |>
