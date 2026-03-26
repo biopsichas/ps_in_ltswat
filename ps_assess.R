@@ -9,6 +9,7 @@ library(sf)
 library(future.apply)
 library(future)
 library(openxlsx)
+library(rmapshaper)
 if (!requireNamespace("SWATreadR", quietly = TRUE)) {
   devtools::install_github("chrisschuerz/SWATreadR")
 }
@@ -21,6 +22,12 @@ source("function.R")
 
 ## Read model if TRUE, otherwise read from RDS (saved results)
 read_model_files <- FALSE
+
+## Simplify geometry if TRUE for leaflet or read from RDS (saved results)
+simplify_geometry <- TRUE
+
+## Remove existing temp_folder if it exists (to ensure clean start)
+clean_start <- FALSE
 
 ## Temp folder for saving model outputs
 temp_folder <- "Temp"
@@ -49,9 +56,28 @@ ps_data <- paste0(data_path, "PS/")
 river_N_retention <- 0.00024
 river_P_retention <- 0.00045
 
+## Defining number of cores for parallel processing (adjust based on your system)
+num_cores <- 15
+
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ## 3) Reading data ----
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+## Manage the temp_folder directory
+if(clean_start){
+  if (dir.exists(temp_folder)) {
+    unlink(temp_folder, recursive = TRUE) # Delete existing folder
+    paste0("Existing folder '", temp_folder, "' deleted for a clean start.")
+  }
+  dir.create(temp_folder, recursive = TRUE) # Create fresh folder
+} else {
+  if (!dir.exists(temp_folder)) {
+    dir.create(temp_folder, recursive = TRUE) # Create folder if it doesn't exist
+    paste0("Folder '", temp_folder, "' created.")
+  } else {
+    paste0("Folder '", temp_folder, "' already exists. Some files may be overwritten.")
+  }
+}
 
 ## Read basin shapefile
 basins_sf <- st_read(dsn = paste0(gis_path,"basin.gdb"), layer = "basin",
@@ -64,6 +90,41 @@ basins <- basins_sf |> st_drop_geometry() |>
 
 ## Read reaches shae file
 segments_sf <- st_read(paste0(gis_path, "segments_coarse.shp"), quiet = T)
+
+if(simplify_geometry){
+  # Check size in Megabytes basin
+  print(paste0("Basin file is ", format(object.size(basins_sf), units = "Mb")))
+
+  # Check size in Megabytes segments
+  print(paste0("Basin file is ", format(object.size(segments_sf), units = "Mb")))
+
+  basins_simp <- st_make_valid(basins_sf) |>
+    st_simplify(preserveTopology = TRUE, dTolerance = 10) |>
+    ms_simplify(
+      keep = 0.05,          # 5% of original detail
+      snap = TRUE,          # Fuses boundaries together
+      snap_interval = 0.001, # Adjust this if gaps persist
+      keep_shapes = TRUE
+    ) |> st_transform(4326)
+
+  segments_simp <- st_simplify(segments_sf, preserveTopology = TRUE, dTolerance = 10) |>
+    st_transform(4326)
+
+  # mapview::mapview(segments_simp) + mapview::mapview(basins_simp)
+
+  print(paste0("Basin file is ", format(object.size(basins_simp), units = "Mb")))
+  print(paste0("Basin file is ", format(object.size(basins_simp), units = "Mb")))
+
+  saveRDS(basins_simp, file = file.path(temp_folder, "basins_simp.rds"))
+  saveRDS(segments_simp, file = file.path(temp_folder, "segments_simp.rds"))
+} else {
+  ## Reading rds files if they exist,
+  ## otherwise will need to be created by setting simplify_geometry = TRUE
+  basins_simp <- readRDS(file.path(temp_folder, "basins_simp.rds"))
+  segments_simp <- readRDS(file.path(temp_folder, "segments_simp.rds"))
+  print(paste0("Simplified basin and segment files loaded from RDS"))
+}
+
 
 ## Preparing Subbasin Setup_name table
 sstable <- basins_sf %>% st_drop_geometry %>% select(Subbasin, Setup_name) %>%
@@ -103,25 +164,28 @@ ps_files <- list.files(ps_data, pattern = "\\.xlsx$", full.names = TRUE)
 ps_names <- tools::file_path_sans_ext(basename(ps_files))
 ps_lst <- list()
 for(i in seq_along(ps_files)) {
-  print(i)
   ps_lst[[ps_names[i]]] <- read.xlsx(ps_files[i], sheet = 1, check.names = FALSE)[c(1:7)] |>
-    setNames(c("Išleistuvo kodas", "Pavadinimas", "Nuotėkų kiekis 1000 m3/metus", "Bendrasis azotas (kg/metus)", "Bendrasis fosforas (kg/metus)", "X", "Y")) |>
-    mutate(cross(c(1, 6, 7), ~  as.integer),
-           cross(c(3, 4, 5), ~  as.numeric))
-
-  # assign(ps_names[i], read.xlsx(ps_files[i], sheet = 1))
-  # assign(ps_names[i], read.xlsx(ps_files[i], sheet = 1))
+    setNames(c("Išleistuvo kodas", "Pavadinimas", "Nuotėkų kiekis 1000 m3/metus",
+               "Bendrasis azotas (kg/metus)", "Bendrasis fosforas (kg/metus)", "X", "Y")) |>
+    mutate(across(c(1, 6, 7), as.integer),
+           across(c(3, 4, 5), as.numeric),
+           across(c(3, 4, 5), ~round(.,1))) |>
+    filter(X > 0 & Y > 0) |> # Filter out rows with invalid coordinates
+    st_as_sf(coords = c("X", "Y"), crs = 3346, remove = FALSE) |>
+    st_join(basins_sf["cach_id"], left = TRUE) |>
+    st_drop_geometry() |>
+    select(cach_id, everything())
+  print(paste0("Point source data in ", ps_names[i], " was read."))
 }
 
-
-0## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ## 4) Reading SWAT output files and calculating concentration in parallel ----
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 if(read_model_files){
   ## Define parallel plan
   # Note: Ensure 'workers' doesn't exceed your physical cores to avoid overhead
-  plan(multisession, workers = 15)
+  plan(multisession, workers = num_cores)
 
   # Build list of paths first
   all_tasks <- lapply(seq_len(nrow(sstable)), function(i) {
@@ -147,14 +211,7 @@ if(read_model_files){
   plan(sequential)
 
   ## --- Save to temp_folder .rds file ---
-
-  # 1. Manage the directory
-  if (dir.exists(temp_folder)) {
-    unlink(temp_folder, recursive = TRUE) # Delete existing folder
-  }
-  dir.create(temp_folder, recursive = TRUE) # Create fresh folder
-
-  # 2. Save the result
+  # Save the result
   saveRDS(df_mod, file = file.path(temp_folder, "df_mod.rds"))
 
   message("Model files processed and saved to: ", temp_folder)
@@ -177,7 +234,7 @@ if(read_model_files){
 
 if(read_model_files){
   ## Define parallel plan
-  plan(multisession, workers = 15)
+  plan(multisession, workers = num_cores)
 
   # Build list of paths first
   all_tasks <- lapply(seq_len(nrow(sstable)), function(i) {
@@ -256,46 +313,6 @@ df_res_cl <- df_res |>
   select(cach_id, wrt_days, l_retN, l_retP) |>
   # Clean up NAs
   mutate(across(c(wrt_days, l_retN, l_retP), ~ replace_na(.x, 0)))
-
-
-
-df_ps <- read.csv("point_source_loads.csv",
-                  check.names = FALSE,
-                  fileEncoding = "UTF-8")|>
-  select(c("Išleistuvo kodas", "Teršalo pavadinimas", "Tiesioginis VT cach_id",  "Teršalo kiekis išleidžiamose nuotekose (kg/metus)")) |>
-  filter(`Teršalo pavadinimas` %in% c("Bendrasis azotas", "Bendrasis fosforas")) |>
-  setNames(c("ps_code", "populant", "cach_id", "load_kg_per_year")) |>
-  mutate(cach_id = as.integer(cach_id),
-         populant = ifelse(populant == "Bendrasis azotas", "TN", "TP"),
-         load_kg_per_year = as.numeric(load_kg_per_year)) |>
-  pivot_wider(
-    id_cols = c(cach_id, ps_code), # This tells R: "one row per code per catchment"
-    names_from = populant,
-    values_from = load_kg_per_year,
-    values_fn = sum
-  ) |>
-  replace_na(list(TN = 0, TP = 0))
-
-## Converting GIS files for the leaflet
-basins_4326 <- st_transform(basins, 4326)
-segments_4326 <- st_read(paste0(gis_path, "segments_coarse.shp"), quiet = T) |>
-  st_transform(4326)
-ps_info <- readRDS("Data/ps_sf_info.rds")
-
-
-
-ps_template <- ps_info |>
-  st_transform(3346) |>
-  mutate(X = st_coordinates(geometry)[,1],
-         Y = st_coordinates(geometry)[,2]) |>
-  st_drop_geometry() |>
-  select(-cach_id) |>
-  setNames(c("Išleistuvo kodas", "Pavadinimas", "Nuotėkų kiekis 1000 m3/metus", "Bendrasis azotas (kg/metus)", "Bendrasis fosforas (kg/metus)", "X", "Y"))
-
-## Same into excel file for manual checking
-library(openxlsx)
-write.xlsx(ps_template, "test/ps_template.xlsx", rowNames = FALSE)
-
 
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ## 7) MAIN PART: Building the river map with all the information. ----
@@ -466,7 +483,6 @@ while(length(to_do_ids) > 0) {
     break
   }
 }
-
 
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ## 8) Preparing the data for presentation ----
