@@ -100,9 +100,21 @@ wb_problematic <- read.xlsx(wb_rel, sheet = "problem_wb")
 
 ## List all files in the point source data folder
 ps_files <- list.files(ps_data, pattern = "\\.xlsx$", full.names = TRUE)
-ps_files
+ps_names <- tools::file_path_sans_ext(basename(ps_files))
+ps_lst <- list()
+for(i in seq_along(ps_files)) {
+  print(i)
+  ps_lst[[ps_names[i]]] <- read.xlsx(ps_files[i], sheet = 1, check.names = FALSE)[c(1:7)] |>
+    setNames(c("Išleistuvo kodas", "Pavadinimas", "Nuotėkų kiekis 1000 m3/metus", "Bendrasis azotas (kg/metus)", "Bendrasis fosforas (kg/metus)", "X", "Y")) |>
+    mutate(cross(c(1, 6, 7), ~  as.integer),
+           cross(c(3, 4, 5), ~  as.numeric))
 
-## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+  # assign(ps_names[i], read.xlsx(ps_files[i], sheet = 1))
+  # assign(ps_names[i], read.xlsx(ps_files[i], sheet = 1))
+}
+
+
+0## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ## 4) Reading SWAT output files and calculating concentration in parallel ----
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
