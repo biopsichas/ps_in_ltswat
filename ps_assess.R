@@ -6,8 +6,8 @@ library(tidyverse)
 library(lubridate)
 library(data.table)
 library(sf)
-library(future.apply)
 library(future)
+library(future.apply)
 library(openxlsx)
 library(rmapshaper)
 if (!requireNamespace("SWATreadR", quietly = TRUE)) {
@@ -23,11 +23,14 @@ source("function.R")
 ## Read model if TRUE, otherwise read from RDS (saved results)
 read_model_files <- FALSE
 
-## Simplify geometry if TRUE for leaflet or read from RDS (saved results)
-simplify_geometry <- TRUE
+## Simplify geometry if TRUE for leaflet or FALSE to read from RDS (saved results)
+simplify_geometry <- FALSE
 
 ## Remove existing temp_folder if it exists (to ensure clean start)
 clean_start <- FALSE
+
+## Save calculated river_map as RDS file in temp_folder (TRUE) or not (FALSE)
+save_river_map <- TRUE
 
 ## Temp folder for saving model outputs
 temp_folder <- "Temp"
@@ -57,6 +60,8 @@ river_N_retention <- 0.00024
 river_P_retention <- 0.00045
 
 ## Defining number of cores for parallel processing (adjust based on your system)
+## Only used if read_model_files = TRUE,
+## otherwise will read from RDS which is much faster.
 num_cores <- 15
 
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -90,6 +95,7 @@ basins <- basins_sf |> st_drop_geometry() |>
 
 ## Read reaches shae file
 segments_sf <- st_read(paste0(gis_path, "segments_coarse.shp"), quiet = T)
+segments <- segments_sf |> st_drop_geometry()
 
 if(simplify_geometry){
   # Check size in Megabytes basin
@@ -124,7 +130,6 @@ if(simplify_geometry){
   segments_simp <- readRDS(file.path(temp_folder, "segments_simp.rds"))
   print(paste0("Simplified basin and segment files loaded from RDS"))
 }
-
 
 ## Preparing Subbasin Setup_name table
 sstable <- basins_sf %>% st_drop_geometry %>% select(Subbasin, Setup_name) %>%
@@ -335,10 +340,10 @@ upstreams_ids <- setdiff(basins_info$cach_id, basins_info$flow_to)
 # This replaces your 'x' logic entirely in one clean step
 upstreams_ids <- upstreams_ids[!(upstreams_ids %in% transfer$flowto)]
 
-
+# 4. Initialize river_map with the upstream IDs, including their inflow and point source loads
 river_map <- lapply(upstreams_ids, function(id) {
-  ps <- df_ps[df_ps$cach_id == id,]
-  df <- df_mod[df_mod$cach_id == id,]
+  # Basic catchment data
+  df <- df_mod_cl[df_mod_cl$cach_id == id,]
   # Return a nested list: one part for the area, one part for the inflows
   inflow = data.frame(
     cach_id = id,
@@ -349,36 +354,53 @@ river_map <- lapply(upstreams_ids, function(id) {
     len = basins_info$length[match(id, basins_info$cach_id)],
     r_retN = basins_info$r_retN[match(id, basins_info$cach_id)],
     r_retP = basins_info$r_retP[match(id, basins_info$cach_id)],
-    l_retN = 1 - df_res$l_retN[match(id, df_res$cach_id)],
-    l_retP = 1 - df_res$l_retP[match(id, df_res$cach_id)],
+    l_retN = 1 - df_res_cl$l_retN[match(id, df_res_cl$cach_id)],
+    l_retP = 1 - df_res_cl$l_retP[match(id, df_res_cl$cach_id)],
     zero_N_load = df$flo_out * df$tn_conc * 31536,
     zero_P_load = df$flo_out * df$tp_conc * 31536,
     stringsAsFactors = FALSE)
-  if(nrow(ps)>0){
-    ps_load = ps |>
-      mutate(TN = TN * inflow$r_retN * inflow$l_retN,
-             TP = TP * inflow$r_retP * inflow$l_retP,
-             TN_conc_added = TN / (df$flo_out * 31536),
-             TP_conc_added = TP / (df$flo_out * 31536))
-  } else {
-    ps_load = data.frame(
-      cach_id = integer(),
-      ps_code = integer(),
-      TN = numeric(),
-      TP = numeric(),
-      TN_conc_added = numeric(),
-      TP_conc_added = numeric(),
-      stringsAsFactors = FALSE
-    )
-  }
+  # 2. Iterate through each dataframe in ps_lst
+  # This creates a list of ps_load dataframes for this specific ID
+    ps_load_list <- lapply(names(ps_lst), function(nm) {
+      ps_subset <- ps_lst[[nm]][ps_lst[[nm]]$cach_id == id & !is.na(ps_lst[[nm]]$cach_id), ]
+      if(nrow(ps_subset) > 0) {
+        # Apply your logic to the specific scenario
+        ps_res <- ps_subset |>
+          mutate(
+            TN = `Bendrasis azotas (kg/metus)` * inflow$r_retN * inflow$l_retN,
+            TP = `Bendrasis fosforas (kg/metus)` * inflow$r_retP * inflow$l_retP,
+            TN_conc_added = TN / (df$flo_out * 31536),
+            TP_conc_added = TP / (df$flo_out * 31536)
+          )
+      } else {
+        # Empty dataframe with correct columns if no match found for this ID
+        ps_res <- data.frame(
+          cach_id = integer(),
+          TN = numeric(),
+          TP = numeric(),
+          TN_conc_added = numeric(),
+          TP_conc_added = numeric(),
+          stringsAsFactors = FALSE
+        )
+      }
+      return(ps_res)
+    })
+
+  # Name the internal list elements so you can call river_map[[1]]$ps_load$scenario_name
+  names(ps_load_list) <- names(ps_lst)
 
   list(
     inflow = inflow,
-    ps_load = ps_load
+    ps_load = ps_load_list
   )
 })
 
+## Assign names to river_map based on the upstream IDs for easy access
 names(river_map) <- upstreams_ids
+
+## Check the size of the river_map object in memory
+print(paste0("Upstreams calculated 'river_map' object size ",
+             format(object.size(river_map), units = "MB")))
 
 # Get a list of all unique basin IDs that need to be processed
 to_do_ids <- setdiff(unique(basins_info$cach_id), names(river_map))
@@ -403,9 +425,9 @@ while(length(to_do_ids) > 0) {
     }
     # CRITICAL: Only proceed if ALL upstream contributors are now in river_map
     if(all(as.character(inflow_ids) %in% names(river_map))) {
-      ps <- df_ps[df_ps$cach_id == id,]
-      df <- df_mod[df_mod$cach_id == id,]
+      df <- df_mod_cl[df_mod_cl$cach_id == id,]
 
+      # 1. Standard Inflow Calculation (remains a single dataframe)
       inflow <- data.frame(
         cach_id = id,
         fraction = 1,
@@ -415,99 +437,136 @@ while(length(to_do_ids) > 0) {
         len = basins_info$length[match(id, basins_info$cach_id)],
         r_retN = basins_info$r_retN[match(id, basins_info$cach_id)],
         r_retP = basins_info$r_retP[match(id, basins_info$cach_id)],
-        l_retN = 1 - df_res$l_retN[match(id, df_res$cach_id)],
-        l_retP = 1 - df_res$l_retP[match(id, df_res$cach_id)],
+        l_retN = 1 - df_res_cl$l_retN[match(id, df_res_cl$cach_id)],
+        l_retP = 1 - df_res_cl$l_retP[match(id, df_res_cl$cach_id)],
         zero_N_load = df$flo_out * df$tn_conc * 31536,
         zero_P_load = df$flo_out * df$tp_conc * 31536,
         stringsAsFactors = FALSE
       )
       inflow_br <- inflow[c("r_retN", "r_retP", "l_retN", "l_retP")]
 
-      if(nrow(ps)>0){
-        ps_load = ps |>
-          mutate(TN = TN * inflow$r_retN * inflow$l_retN,
-                 TP = TP * inflow$r_retP * inflow$l_retP,
-                 TN_conc_added = TN / (df$flo_out * 31536),
-                 TP_conc_added = TP / (df$flo_out * 31536))
-      } else {
-        ps_load = data.frame(
-          cach_id = integer(),
-          ps_code = integer(),
-          TN = numeric(),
-          TP = numeric(),
-          TN_conc_added = numeric(),
-          TP_conc_added = numeric(),
-          stringsAsFactors = FALSE
-        )
-      }
-      for(in_id in inflow_ids) {
-        if(!is.null(inflow_tranfer_id) && in_id %in% inflow_tranfer_id){
-          tmp <- river_map[[as.character(in_id)]]$inflow
-          tmp$fraction <- tmp$fraction * multiplier
-
-          if(nrow(river_map[[as.character(in_id)]]$ps_load) > 0){
-            ps_load_tmp <- river_map[[as.character(in_id)]]$ps_load |>
-              mutate(TN = TN * multiplier * inflow_br $r_retN * inflow_br$l_retN,
-                     TP = TP * multiplier * inflow_br $r_retP * inflow_br$l_retP,
-                     TN_conc_added = TN / (df$flo_out * 31536),
-                     TP_conc_added = TP / (df$flo_out * 31536))
-          }
+      # 2. Iterate through each point source scenario, the current cach_id
+      ps_load_list <- lapply(names(ps_lst), function(nm) {
+        ps_subset <- ps_lst[[nm]][ps_lst[[nm]]$cach_id == id & !is.na(ps_lst[[nm]]$cach_id), ]
+        if(nrow(ps_subset) > 0) {
+          ps_load_acc <- ps_subset |>
+            mutate(TN = `Bendrasis azotas (kg/metus)` * inflow$r_retN * inflow$l_retN,
+                   TP = `Bendrasis fosforas (kg/metus)` * inflow$r_retP * inflow$l_retP,
+                   TN_conc_added = TN / (df$flo_out[1] * 31536),
+                   TP_conc_added = TP / (df$flo_out[1] * 31536))
         } else {
-          tmp <- river_map[[as.character(in_id)]]$inflow
+          ps_load_acc <- data.frame(
+            "cach_id" = numeric(),
+            "Išleistuvo kodas" = integer(),
+            "Pavadinimas" = character(),
+            "Nuotėkų kiekis 1000 m3/metus" = numeric(),
+            "Bendrasis azotas (kg/metus)" = numeric(),
+            "Bendrasis fosforas (kg/metus)" = numeric(),
+            "X" = integer(),
+            "Y" = integer(),
+            "TN" = numeric(),
+            "TP" = numeric(),
+            "TN_conc_added" = numeric(),
+            "TP_conc_added" = numeric(),
+            stringsAsFactors = FALSE,
+            check.names = FALSE # CRITICAL: prevents R from changing spaces to dots
+          )
+        }
+        # Pull and aggregate loads from all upstream IDs for THIS scenario
+        for(in_id in inflow_ids) {
+          up_ps <- river_map[[as.character(in_id)]]$ps_load[[nm]]
+          if(nrow(up_ps) > 0) {
+            # Apply transfer multiplier if applicable
+            m <- if(!is.null(inflow_tranfer_id) && in_id %in% inflow_tranfer_id) multiplier else 1
 
-          if(nrow(river_map[[as.character(in_id)]]$ps_load) > 0){
-            ps_load_tmp <- river_map[[as.character(in_id)]]$ps_load |>
-              mutate(TN = TN * inflow_br$r_retN * inflow_br$l_retN,
-                     TP = TP * inflow_br$r_retP * inflow_br$l_retP,
-                     TN_conc_added = TN / (df$flo_out * 31536),
-                     TP_conc_added = TP / (df$flo_out * 31536))
+            ## Apply retention and concentration calculations to the upstream point source loads
+            ps_up_processed <- up_ps |>
+              mutate(TN = TN * m * inflow$r_retN * inflow$l_retN,
+                     TP = TP * m * inflow$r_retP * inflow$l_retP,
+                     TN_conc_added = TN / (df$flo_out[1] * 31536),
+                     TP_conc_added = TP / (df$flo_out[1] * 31536))
+
+            ps_load_acc <- rbind(ps_load_acc, ps_up_processed)
           }
         }
+        return(ps_load_acc)
+      })
+      names(ps_load_list) <- names(ps_lst)
 
+      # 3. Handle physical inflow geometry (Area accumulation)
+      for(in_id in inflow_ids) {
+        tmp <- river_map[[as.character(in_id)]]$inflow
+        if(!is.null(inflow_tranfer_id) && in_id %in% inflow_tranfer_id) tmp$fraction <- tmp$fraction * multiplier
         inflow <- rbind(inflow, tmp)
-        if(exists("ps_load_tmp")){
-          ps_load <- rbind(ps_load, ps_load_tmp)
-          rm(ps_load_tmp)
-        }
       }
-      river_map[[as.character(id)]]$inflow <- inflow
-      river_map[[as.character(id)]]$ps_load <- ps_load
+
+      # Save results to the map
+      river_map[[as.character(id)]] <- list(inflow = inflow, ps_load = ps_load_list)
       to_do_ids <- setdiff(to_do_ids, id)
     }
   }
-
-  # Safety Break: If a whole loop finishes and we didn't add anything new,
-  # something is wrong with the network logic (e.g., a circular reference)
   if(length(to_do_ids) == starting_count) {
-    warning("Loop stopped: No new basins could be processed. Check for gaps in your network.")
+    warning("Loop stopped: No progress made. Check for network cycles.")
     break
   }
 }
+
+print(paste0("Calculated full 'river_map' object size ",
+             format(object.size(river_map), units = "MB")))
+## Test single
+# x <- river_map[["8274"]]
 
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ## 8) Preparing the data for presentation ----
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 for(id in names(river_map)){
+
+  # 1. Update Inflow (Stays the same as it's a single dataframe)
   river_map[[id]]$inflow <- river_map[[id]]$inflow |>
-    mutate(area = round(area/1000000, 1),
-           added_area = round(added_area/1000000, 1),
+    mutate(area        = round(area/1000000, 1),
+           added_area  = round(added_area/1000000, 1),
            inflow_area = round(inflow_area/1000000, 1),
-           len = round(len/1000, 1),
-           r_retN = round(r_retN, 3),
-           r_retP = round(r_retP, 3),
-           l_retN = round(l_retN, 3),
-           l_retP = round(l_retP, 3),
+           len         = round(len/1000, 1),
+           r_retN      = round(r_retN, 3),
+           r_retP      = round(r_retP, 3),
+           l_retN      = round(l_retN, 3),
+           l_retP      = round(l_retP, 3),
            zero_N_load = round(zero_N_load/1000, 1),
            zero_P_load = round(zero_P_load/1000, 1))
-  ps_n_sum <- river_map[[id]]$ps_load$TN |> sum()
-  ps_p_sum <- river_map[[id]]$ps_load$TP |> sum()
-  river_map[[id]]$ps_load <- river_map[[id]]$ps_load |>
-    mutate(TN_proc = round(100*(TN/ps_n_sum), 1),
-           TP_proc = round(100*(TP/ps_p_sum), 1),
-           TN = round(TN/1000, 3),
-           TP = round(TP/1000, 3),
-           TN_conc_added = round(TN_conc_added, 3),
-           TP_conc_added = round(TP_conc_added, 3))
+
+  # 2. Update PS Loads for ALL scenarios
+  # We use lapply to loop through scenarios
+  river_map[[id]]$ps_load <- lapply(river_map[[id]]$ps_load, function(df_scenario) {
+
+    # Check if the scenario dataframe has data to avoid errors on empty sets
+    if(nrow(df_scenario) > 0) {
+      ps_n_sum <- sum(df_scenario$TN, na.rm = TRUE)
+      ps_p_sum <- sum(df_scenario$TP, na.rm = TRUE)
+
+      # Handle potential division by zero if sum is 0
+      df_scenario <- df_scenario |>
+        mutate(TN_proc = if(ps_n_sum > 0) round(100*(TN/ps_n_sum), 1) else 0,
+               TP_proc = if(ps_p_sum > 0) round(100*(TP/ps_p_sum), 1) else 0,
+               TN = round(TN/1000, 3),
+               TP = round(TP/1000, 3),
+               TN_conc_added = round(TN_conc_added, 3),
+               TP_conc_added = round(TP_conc_added, 3))
+    }
+    return(df_scenario)
+  })
 }
+
+print(paste0("Final full 'river_map' object size ",
+             format(object.size(river_map), units = "MB")))
+
+## Optionally save the final river_map to an RDS file for use in the Shiny app or other analyses
+if(save_river_map){
+  saveRDS(river_map, file = file.path(temp_folder, "river_map.rds"))
+  message("Final river_map saved to: ", file.path(temp_folder, "river_map.rds"))
+}
+
+## Print a summary of the final river_map structure
+print("Point source load allocation script finished successfully.")
+print(paste0("Final river_map contains ", length(river_map), " catchments."))
 
