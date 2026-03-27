@@ -513,9 +513,6 @@ while(length(to_do_ids) > 0) {
 
 print(paste0("Calculated full 'river_map' object size ",
              format(object.size(river_map), units = "MB")))
-## Test single
-# x <- river_map[["8274"]]
-
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 ## 8) Preparing the data for presentation ----
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -534,8 +531,43 @@ for(id in names(river_map)){
            l_retP      = round(l_retP, 3),
            zero_N_load = round(zero_N_load/1000, 1),
            zero_P_load = round(zero_P_load/1000, 1))
+  # 2. Add concentrations and flow information to the inflow dataframe.
+  river_map[[id]]$inflow_conc <- df_mod_cl[df_mod_cl$cach_id == id,]
 
-  # 2. Update PS Loads for ALL scenarios
+  ps_sums <- sapply(river_map[[id]]$ps_load, function(df_scenario) {
+    if(nrow(df_scenario) > 0) {
+      return(c(sum_TN_conc = sum(df_scenario$TN_conc_added, na.rm = TRUE),
+               sum_TP_conc = sum(df_scenario$TP_conc_added, na.rm = TRUE)))
+    } else {
+      return(c(sum_TN_conc = 0, sum_TP_conc = 0))
+    }
+  })
+
+  # Transpose and convert to dataframe to merge/cbind
+  ps_sums_df <- as.data.frame(t(ps_sums))
+
+  # Add these as new columns to inflow_conc
+  # Note: This assumes inflow_conc has one row per scenario or matches the ps_load names
+  river_map[[id]]$inflow_conc <- cbind(river_map[[id]]$inflow_conc, ps_sums_df) |>
+    mutate(tn_conc_f = tn_conc + sum_TN_conc,
+           tp_conc_f = tp_conc + sum_TP_conc) |>
+    mutate(TN_class = case_when(
+      tn_conc_f <  2.00  ~ 1,
+      tn_conc_f <= 3.00  ~ 2,
+      tn_conc_f <= 6.00  ~ 3,
+      tn_conc_f <= 12.00 ~ 4,
+      tn_conc_f >  12.00 ~ 5,
+      TRUE ~ NA_real_),
+           TP_class = case_when(
+             tp_conc_f <  0.10  ~ 1,
+             tp_conc_f <= 0.14  ~ 2,
+             tp_conc_f <= 0.23  ~ 3,
+             tp_conc_f <= 0.47  ~ 4,
+             tp_conc_f >  0.47  ~ 5,
+             TRUE ~ NA_real_)) |>
+    tibble::rownames_to_column(var = "scenario")
+
+  # 3. Update PS Loads for ALL scenarios
   # We use lapply to loop through scenarios
   river_map[[id]]$ps_load <- lapply(river_map[[id]]$ps_load, function(df_scenario) {
 
@@ -559,6 +591,9 @@ for(id in names(river_map)){
 
 print(paste0("Final full 'river_map' object size ",
              format(object.size(river_map), units = "MB")))
+
+# ## Test single
+# x <- river_map[["8274"]]
 
 ## Optionally save the final river_map to an RDS file for use in the Shiny app or other analyses
 if(save_river_map){
