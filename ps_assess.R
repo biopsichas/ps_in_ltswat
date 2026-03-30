@@ -46,11 +46,6 @@ data_path <- "Data/"
 
 ## GIS data
 gis_path <- paste0(data_path, "GIS/")
-## Point source loads
-
-## Water body to cach_id relationship, and problematic water bodies that need
-## to be checked manually
-wb_rel <- paste0(data_path, "WB_representative_SWAT_segments_final.xlsx")
 
 ## Point source loads
 ps_data <- paste0(data_path, "PS/")
@@ -152,11 +147,6 @@ transfer <- read.csv(paste0(data_path, "transfers.csv"),
 catch_coarse_info <- read.csv("Data/catchment_coarse.csv", header = F) |>
   setNames(c("id", "type", "segmentid", "lakegid", "kadastroid", "kadastroid_lake",
              "flow_to", "segmentto", "outletid", "area", "addedarea", "inflowarea"))
-
-## Reading the relationship between water bodies and catchment IDs, as well as a list
-## of problematic water bodies that need to be checked manually.
-wb_to_cach_id <- read.xlsx(wb_rel, sheet = "cach_id_to_wb")
-wb_problematic <- read.xlsx(wb_rel, sheet = "problem_wb")
 
 ## Reading point source loads: This dataset contains information about
 ## the pollutant loads from point sources (e.g., wastewater treatment plants,
