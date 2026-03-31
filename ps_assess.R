@@ -594,4 +594,3 @@ if(save_river_map){
 ## Print a summary of the final river_map structure
 print("Point source load allocation script finished successfully.")
 print(paste0("Final river_map contains ", length(river_map), " catchments."))
-
