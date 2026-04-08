@@ -389,6 +389,39 @@ server <- function(input, output, session) {
     current_load_n <- (current_flow * conc_data$tn_conc_f[1] * seconds_in_year) / 1e6
     current_load_p <- (current_flow * conc_data$tp_conc_f[1] * seconds_in_year) / 1e6
 
+    # Required reduction to meet thresholds
+    req_red_n <- max_load_n - current_load_n
+    req_red_p <- max_load_p - current_load_p
+
+    # Required reduction to meet thresholds set to 0 if above 0
+    req_red_n <- if(req_red_n < 0) req_red_n else 0
+    req_red_p <- if(req_red_p < 0) req_red_p else 0
+
+    # Calculate the contribution of point sources to the current load
+    ps_load_n <- (current_flow * conc_data$sum_TN_conc[1] * seconds_in_year) / 1e6
+    ps_load_p <- (current_flow * conc_data$sum_TP_conc[1] * seconds_in_year) / 1e6
+
+    # Calculate the required percentage reduction in point source loads to meet the thresholds, only if reduction is needed and possible
+    # For TN
+    if(req_red_n == 0) {
+      tn_requirement <- span(style = "color:#276940; font-weight:bold; font-size:14px;", "mažinimas nereikalingas!")
+    } else if (abs(req_red_n) <= ps_load_n) {
+      tn_requirement <- round(100 * req_red_n/ ps_load_n, 1)
+      tn_requirement <- span(style = "color:#D4660F; font-weight:bold; font-size:14px;", paste(tn_requirement, "%"))
+    } else {
+      tn_requirement <- span(style = "color:#C41800; font-weight:bold; font-size:14px;",  "neįmanomas!!!")
+    }
+
+    # For TP
+    if(req_red_p == 0) {
+      tp_requirement <- span(style = "color:#276940; font-weight:bold; font-size:14px;", "mažinimas nereikalingas!")
+    } else if (abs(req_red_p) <= ps_load_p) {
+      tp_requirement <- round(100 * req_red_p/ ps_load_p, 1)
+      tp_requirement <- span(style = "color:#D4660F; font-weight:bold; font-size:14px;", paste(tp_requirement, "%"))
+    } else {
+      tp_requirement <- span(style = "color:#C41800; font-weight:bold; font-size:14px;",  "neįmanomas!!!")
+    }
+
     ps_number <- if (!is.null(ps_data()) && is.data.frame(ps_data())) {
       nrow(ps_data())
     } else {
@@ -418,7 +451,13 @@ server <- function(input, output, session) {
       tags$ul(style = "margin-bottom:5px; padding-left:20px;",
               tags$li("Esama konc.: ", round(conc_data$tn_conc_f[1], 2), " N mg/l"),
               tags$li("Maks. leistinas krūvis: ", tags$b(round(max_load_n, 2)), " t/m"),
-              tags$li("Esamas metinis krūvis: ", round(current_load_n, 2), " t/m")
+              tags$li("Esamas metinis krūvis: ", round(current_load_n, 2), " t/m"),
+              tags$li("Reikalingas sumažinimas: ", round(req_red_n, 2), " t/m"),
+              tags$li("Taškinių šaltinių indėlis: ", round(ps_load_n, 2), " t/m"),
+              tags$li("Reikalingas min. šaltinių sumažinimas pasiekti g.b.:",
+                      tags$br(),
+                      tn_requirement
+              )
       ),
 
       # Phosphorus Info
@@ -426,7 +465,13 @@ server <- function(input, output, session) {
       tags$ul(style = "margin-bottom:5px; padding-left:20px;",
               tags$li("Esama konc.: ", round(conc_data$tp_conc_f[1], 3), " P mg/l"),
               tags$li("Maks. leistinas krūvis: ", tags$b(round(max_load_p, 3)), " t/m"),
-              tags$li("Esamas metinis krūvis: ", round(current_load_p, 3), " t/m")
+              tags$li("Esamas metinis krūvis: ", round(current_load_p, 3), " t/m"),
+              tags$li("Reikalingas sumažinimas: ", round(req_red_p, 2), " t/m"),
+              tags$li("Taškinių šaltinių indėlis ", round(ps_load_p, 3), " t/m"),
+              tags$li("Reikalingas min. šaltinių sumažinimas pasiekti g.b.:",
+                      tags$br(),
+                      tp_requirement
+              )
       ),
       tags$hr(style="margin: 5px 0; border-top: 1px dashed #ccc;"),
 
