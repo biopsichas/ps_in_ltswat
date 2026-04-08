@@ -21,7 +21,7 @@ source("function.R")
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 ## Read model if TRUE, otherwise read from RDS (saved results)
-read_model_files <- FALSE
+read_model_files <- TRUE
 
 ## Simplify geometry if TRUE for leaflet or FALSE to read from RDS (saved results)
 simplify_geometry <- FALSE
@@ -53,6 +53,10 @@ ps_data <- paste0(data_path, "PS/")
 ## Retention coefficients for rivers (per %/km)
 river_N_retention <- 0.00024
 river_P_retention <- 0.00045
+
+## Time period for averaging model outputs (adjust as needed). NULL means all available data.
+start_date <- "2018-01-01"
+end_date   <- NULL
 
 ## Defining number of cores for parallel processing (adjust based on your system)
 ## Only used if read_model_files = TRUE,
@@ -97,24 +101,26 @@ if(simplify_geometry){
   print(paste0("Basin file is ", format(object.size(basins_sf), units = "Mb")))
 
   # Check size in Megabytes segments
-  print(paste0("Basin file is ", format(object.size(segments_sf), units = "Mb")))
+  print(paste0("Segment file is ", format(object.size(segments_sf), units = "Mb")))
 
   basins_simp <- st_make_valid(basins_sf) |>
+    st_cast("MULTIPOLYGON") |>
     st_simplify(preserveTopology = TRUE, dTolerance = 10) |>
     ms_simplify(
       keep = 0.05,          # 5% of original detail
       snap = TRUE,          # Fuses boundaries together
       snap_interval = 0.001, # Adjust this if gaps persist
       keep_shapes = TRUE
-    ) |> st_transform(4326)
+    ) |>
+    st_transform(4326)
 
   segments_simp <- st_simplify(segments_sf, preserveTopology = TRUE, dTolerance = 10) |>
     st_transform(4326)
 
   # mapview::mapview(segments_simp) + mapview::mapview(basins_simp)
 
-  print(paste0("Basin file is ", format(object.size(basins_simp), units = "Mb")))
-  print(paste0("Basin file is ", format(object.size(basins_simp), units = "Mb")))
+  print(paste0("Reduced basin file is ", format(object.size(basins_simp), units = "Mb")))
+  print(paste0("Reduced segment file is ", format(object.size(segments_simp), units = "Mb")))
 
   saveRDS(basins_simp, file = file.path(temp_folder, "basins_simp.rds"))
   saveRDS(segments_simp, file = file.path(temp_folder, "segments_simp.rds"))
@@ -196,7 +202,7 @@ if(read_model_files){
   results <- future_lapply(all_tasks, function(task) {
     if (!file.exists(task$base)) return(NULL)
     # Assuming read_model is a custom function you've defined elsewhere
-    read_model(task$base, "base", task$subb, task$setup)
+    read_model(task$base, "base", task$subb, task$setup,  start_date, end_date)
   })
 
   ## Combine results, filtering out any NULLs
@@ -244,7 +250,7 @@ if(read_model_files){
   ## Run in parallel:
   results <- future_lapply(all_tasks, function(task) {
     if (!file.exists(task$base)) return(NULL)
-    read_res2(task$base, task$subb, task$setup)
+    read_res2(task$base, task$subb, task$setup, start_date, end_date)
   })
 
   ## Combine results, filtering out any NULLs

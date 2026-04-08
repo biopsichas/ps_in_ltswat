@@ -1,7 +1,16 @@
 # Function to read SWAT output files, compute concentrations, and aggregate by month and unit
-read_model <- function(f_path, sc_name, subb, setup) {
+read_model <- function(f_path, sc_name, subb, setup, start_date = NULL, end_date = NULL) {
   dt <- as.data.table(SWATreadR::read_swat(f_path))
-  dt[, year_month := sprintf("%04d-%02d", yr, mon)]
+
+  # Convert yr/mon to a Date object for easy comparison
+  dt[, date := as.Date(paste(yr, mon, "01", sep = "-"))]
+
+  ## Filter early based on yr and mone to speed up processing if date range is provided
+  if (!is.null(start_date) | !is.null(end_date)) {
+    if (!is.null(start_date)) dt <- dt[date >= as.Date(start_date)]
+    if (!is.null(end_date))   dt <- dt[date <= as.Date(end_date)]
+  }
+
   # Compute concentrations
   dt[, tn_conc := ifelse(flo_out == 0, NA_real_,
                          ((orgn_out + nh3_out + no3_out + no2_out)*1e6)/(flo_out*86400*1000))]
@@ -14,11 +23,11 @@ read_model <- function(f_path, sc_name, subb, setup) {
     Scenario = sc_name
   )]
   # Keep only necessary columns
-  dt <- dt[, .(unit, year_month, flo_out, tn_conc, tp_conc,
+  dt <- dt[, .(unit, date, flo_out, tn_conc, tp_conc,
                Subbasin, Setup_name, Scenario)]
   # Ultra-fast aggregation
   dt <- dt[, lapply(.SD, mean, na.rm = TRUE),
-           by = .(unit, year_month, Subbasin, Setup_name, Scenario)]
+           by = .(unit, date, Subbasin, Setup_name, Scenario)]
 
   return(dt)
 }
@@ -35,9 +44,17 @@ read_res <- function(f_path) {
 }
 
 # Function to read SWAT output files, compute concentrations, and aggregate by month and unit
-read_res2 <- function(f_path, subb, setup) {
+read_res2 <- function(f_path, subb, setup, start_date = NULL, end_date = NULL) {
   dt <- as.data.table(SWATreadR::read_swat(f_path))
-  dt[, year_month := sprintf("%04d-%02d", yr, mon)]
+  # Convert yr/mon to a Date object for easy comparison
+  dt[, date := as.Date(paste(yr, mon, "01", sep = "-"))]
+
+  ## Filter early based on yr and mone to speed up processing if date range is provided
+  if (!is.null(start_date) | !is.null(end_date)) {
+    if (!is.null(start_date)) dt <- dt[date >= as.Date(start_date)]
+    if (!is.null(end_date))   dt <- dt[date <= as.Date(end_date)]
+  }
+
   # Add identifiers once
   dt[, `:=`(
     Subbasin = subb,
@@ -49,10 +66,10 @@ read_res2 <- function(f_path, subb, setup) {
   dt[, tp_out := sedp_out + solp_out]
 
   # Keep only necessary columns
-  dt <- dt[, .(unit, year_month, flo_stor, flo_out, tn_in, tn_out, tp_in, tp_out, Subbasin, Setup_name)]
+  dt <- dt[, .(unit, date, flo_stor, flo_out, tn_in, tn_out, tp_in, tp_out, Subbasin, Setup_name)]
   # Ultra-fast aggregation
   dt <- dt[, lapply(.SD, mean, na.rm = TRUE),
-           by = .(unit, year_month, Subbasin, Setup_name)]
+           by = .(unit, date, Subbasin, Setup_name)]
 
   return(dt)
 }
