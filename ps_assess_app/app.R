@@ -125,6 +125,15 @@ server <- function(input, output, session) {
     river_map[[id_for_tables()]]
   })
 
+  # Reactive for Tables (Listens to id_for_tables — now a cach_id)
+  table_data_conc <- reactive({
+    req(table_data())
+    req(input$select_ps_scenario != "")
+    df <- table_data()$inflow_conc
+    ## drop = FALSE to ensure it stays a data frame even if 1 row
+    df[df$scenario == input$select_ps_scenario, , drop = FALSE]
+  })
+
   # Reactive for PS table filtered by scenario
   ps_data <- reactive({
     req(table_data())
@@ -368,6 +377,18 @@ server <- function(input, output, session) {
 
     totals_id <- table_data()$inflow[table_data()$inflow$cach_id == id_for_tables(),]
 
+    # Scenario-Specific Concentrations
+    conc_data <- table_data_conc()
+    current_flow <- conc_data$flo_out[1]
+    seconds_in_year <- 365.25 * 24 * 3600
+    ## Calculate Maximum Possible Load (t/metus) if concentrations were at the threshold level for the entire flow
+    max_load_n <- (current_flow * 3 * seconds_in_year) / 1e6
+    max_load_p <- (current_flow * 0.14 * seconds_in_year) / 1e6
+
+    # Calculate Current Yearly Load (t/metus) for comparison
+    current_load_n <- (current_flow * conc_data$tn_conc_f[1] * seconds_in_year) / 1e6
+    current_load_p <- (current_flow * conc_data$tp_conc_f[1] * seconds_in_year) / 1e6
+
     ps_number <- if (!is.null(ps_data()) && is.data.frame(ps_data())) {
       nrow(ps_data())
     } else {
@@ -387,9 +408,28 @@ server <- function(input, output, session) {
       tags$b("Plotas LT: "), totals$total_area,  " km2", tags$br(),
       tags$b("Visas plotas: "), totals$total_area + totals$added_area + totals$inflow_area, " km2", tags$br(),
       tags$b("Segmentų ilgis: "), totals$len, " km", tags$br(),
+      tags$b("Taškinių šaltinių sk.: "), ps_number, tags$br(),
       tags$b("Bazinis sc. NT krūvis: "), totals_id$zero_N_load, " t/m", tags$br(),
       tags$b("Bazinis sc. PT krūvis:"), totals_id$zero_P_load, " t/m", tags$br(),
-      tags$b("Taškinių šaltinių sk.: "), ps_number
+      tags$b("Debitas: "), round(current_flow, 3), " m3/s", tags$br(),
+      tags$hr(style="margin: 5px 0; border-top: 1px dashed #ccc;"),
+      # Nitrogen Info
+      div(style = "margin-top:5px; color:#2c3e50; font-weight:bold;", "B. azotas:"),
+      tags$ul(style = "margin-bottom:5px; padding-left:20px;",
+              tags$li("Esama konc.: ", round(conc_data$tn_conc_f[1], 2), " N mg/l"),
+              tags$li("Maks. leistinas krūvis: ", tags$b(round(max_load_n, 2)), " t/m"),
+              tags$li("Esamas metinis krūvis: ", round(current_load_n, 2), " t/m")
+      ),
+
+      # Phosphorus Info
+      div(style = "color:#2c3e50; font-weight:bold;", "B. fosforas:"),
+      tags$ul(style = "margin-bottom:5px; padding-left:20px;",
+              tags$li("Esama konc.: ", round(conc_data$tp_conc_f[1], 3), " P mg/l"),
+              tags$li("Maks. leistinas krūvis: ", tags$b(round(max_load_p, 3)), " t/m"),
+              tags$li("Esamas metinis krūvis: ", round(current_load_p, 3), " t/m")
+      ),
+      tags$hr(style="margin: 5px 0; border-top: 1px dashed #ccc;"),
+
     )
   })
 
@@ -430,7 +470,26 @@ server <- function(input, output, session) {
       select(all_of(c(common_cols, nutrient_cols))) |>
       rename(any_of(rename_map)) |>
       arrange(desc(across(last_col()))) |>
-      datatable(options = list(pageLength = 8, scrollX = TRUE), rownames = FALSE)
+      datatable(
+        extensions = 'Buttons', # 1. Enable Buttons extension
+        rownames = FALSE,
+        options = list(
+          pageLength = 8,
+          scrollX = TRUE,
+          dom = 'Bfrtip',       # 2. Add 'B' to the layout to show the buttons
+          buttons = list(       # 3. Define which buttons to show
+            list(
+              extend = 'excel',
+              filename = paste0("Taskiniai_saltiniai_", input$select_cach)
+            ),
+            list(
+              extend = 'csv',
+              filename = paste0("Taskiniai_saltiniai_", input$select_cach)
+            ),
+            'pdf'
+          )
+        )
+      )
   })
 
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -464,8 +523,25 @@ server <- function(input, output, session) {
     table_data()$inflow |>
       select(any_of(c(common_cols, nutrient_cols))) |>
       rename(any_of(rename_map)) |>
-    datatable(options = list(pageLength = 5, scrollX = TRUE))
-
+      datatable(
+        extensions = 'Buttons', # Enable export buttons
+        options = list(
+          pageLength = 5,
+          scrollX = TRUE,
+          dom = 'Bfrtip',       # Layout: Buttons, filter, processing, table, info, pagination
+          buttons = list(
+            list(
+              extend = 'excel',
+              filename = paste0("Baseino_duomenys_", input$select_cach)
+            ),
+            list(
+              extend = 'csv',
+              filename = paste0("Baseino_duomenys_", input$select_cach)
+            ),
+            'pdf'
+          )
+        )
+      )
   })
 }
 
