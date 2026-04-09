@@ -580,11 +580,6 @@ server <- function(input, output, session) {
     common_cols <- c("Išleistuvo kodas", "Pavadinimas",
                      "Nuotėkų kiekis 1000 m3/metus")
 
-    nutrient_cols <- switch(input$select_nutrient,
-                            "Bendrasis azotas"   = c("Bendrasis azotas (kg/metus)", "TN", "TN_conc_added"),
-                            "Bendrasis fosforas" = c("Bendrasis fosforas (kg/metus)", "TP", "TP_conc_added")
-    )
-
     rename_map <- c(
       "Galutiniame taške (N kg/metus)" = "TN",
       "Pridedama konc. (N mg/l)"       = "TN_conc_added",
@@ -592,12 +587,32 @@ server <- function(input, output, session) {
       "Pridedama konc. (P mg/l)"       = "TP_conc_added"
     )
 
+    nutrient_settings <- switch(input$select_nutrient,
+                                "Bendrasis azotas" = list(
+                                  cols = c("Bendrasis azotas (kg/metus)", "TN", "TN_conc_added"),
+                                  calc_name = "B. azotas išleistuve (N mg/l)",
+                                  val_col = "Bendrasis azotas (kg/metus)"
+                                ),
+                                "Bendrasis fosforas" = list(
+                                  cols = c("Bendrasis fosforas (kg/metus)", "TP", "TP_conc_added"),
+                                  calc_name = "B. fosforas išleistuve (P mg/l)",
+                                  val_col = "Bendrasis fosforas (kg/metus)"
+                                )
+    )
+
     ps_data() |>
       mutate(
         TN = TN * 1000,
         TP = TP * 1000
       ) |>
-      select(all_of(c(common_cols, nutrient_cols))) |>
+      select(all_of(c(common_cols, nutrient_settings$cols))) |>
+      ## Calculate concentration dynamically
+      mutate(
+        temp_conc = round(get(nutrient_settings$val_col) / `Nuotėkų kiekis 1000 m3/metus`,
+                          ifelse(input$select_nutrient == "Bendrasis azotas", 1, 2))
+      ) |>
+      ## Rename
+      rename(!!nutrient_settings$calc_name := temp_conc) |>
       rename(any_of(rename_map)) |>
       arrange(desc(across(last_col()))) |>
       datatable(
