@@ -254,20 +254,53 @@ server <- function(input, output, session) {
 
     segment_popup <- switch(input$select_nutrient,
                             "Bendrasis azotas" = ~paste0(
-                              "<b>Baseinėlio ID:</b> ", id, "<br>",
-                              "<b>Debitas:</b> ", round(flo_out, 3), " m3/s<br>",
-                              "<b>Bazinė TN konc.:</b> ", round(tn_conc, 2), " N mg/l<br>",
-                              "<b>Taškinių pridedama TN konc.:</b> ", round(sum_TN_conc, 2), " N mg/l<br>",
-                              "<b>Galutinė TN konc.:</b> ", round(tn_conc_f, 2), " N mg/l<br>",
-                              "<b>VT būklė pagal TN:</b> ", class_label(TN_class)
+                              "<div style='font-family: Arial, sans-serif; min-width: 200px; padding: 5px;'>",
+                              "<div style='font-size: 11px; color: #7f8c8d; margin-bottom: 4px;'>Baseinėlio ID: ", id, "</div>",
+                              "<div style='font-size: 15px; font-weight: bold; margin-bottom: 10px; color: #2c3e50;'>",
+                              "💧 Debitas: <span style='float: right; color: #2980b9;'>", round(flo_out, 3), " m³/s</span>",
+                              "</div>",
+
+                              "<table style='width: 100%; border-collapse: collapse; font-size: 13px;'>",
+                              "<tr><td style='padding: 4px 0;'>🏠 Bazinė konc.</td><td style='text-align: right;'>", round(tn_conc, 2), " mg/l</td></tr>",
+                              "<tr><td style='padding: 4px 0;'>🏭 Taškinių indėlis</td><td style='text-align: right; color: #c0392b;'>+ ", round(sum_TN_conc, 2), " mg/l</td></tr>",
+                              "<tr style='background: #f8f9fa; font-weight: bold; border-top: 2px solid #bdc3c7;'>",
+                              "<td style='padding: 6px 4px;'>📊 Galutinė TN</td>",
+                              "<td style='text-align: right; padding: 6px 4px;'>", round(tn_conc_f, 2), " mg/l</td>",
+                              "</tr>",
+                              "</table>",
+
+                              # Būklės badge su dinamine spalva iš jūsų paletės
+                              "<div style='margin-top: 12px; padding: 8px; border-radius: 4px; text-align: center; font-weight: bold; font-size: 13px; ",
+                              "background-color: ", pal(TN_class), "; ",
+                              "color: ", ifelse(TN_class %in% c(1, 2, 5), "white", "#2c3e50"), ";'>", # Teksto kontrastas
+                              "Būklė: ", class_label(TN_class),
+                              "</div>",
+                              "</div>"
                             ),
+
                             "Bendrasis fosforas" = ~paste0(
-                              "<b>Baseinėlio ID:</b> ", id, "<br>",
-                              "<b>Debitas:</b> ", round(flo_out, 3), " m3/s<br>",
-                              "<b>Bazinė TP konc.:</b> ", round(tp_conc, 3), " P mg/l<br>",
-                              "<b>Taškinių pridedama TP konc.:</b> ", round(sum_TP_conc, 3), " P mg/l<br>",
-                              "<b>Galutinė TP konc.:</b> ", round(tp_conc_f, 3), " P mg/l<br>",
-                              "<b>VT būklė pagal TP:</b> ", class_label(TP_class)
+                              "<div style='font-family: Arial, sans-serif; min-width: 200px; padding: 5px;'>",
+                              "<div style='font-size: 11px; color: #7f8c8d; margin-bottom: 4px;'>Baseinėlio ID: ", id, "</div>",
+                              "<div style='font-size: 15px; font-weight: bold; margin-bottom: 10px; color: #2c3e50;'>",
+                              "💧 Debitas: <span style='float: right; color: #2980b9;'>", round(flo_out, 3), " m³/s</span>",
+                              "</div>",
+
+                              "<table style='width: 100%; border-collapse: collapse; font-size: 13px;'>",
+                              "<tr><td style='padding: 4px 0;'>🏠 Bazinė konc.</td><td style='text-align: right;'>", round(tp_conc, 3), " mg/l</td></tr>",
+                              "<tr><td style='padding: 4px 0;'>🏭 Taškinių indėlis</td><td style='text-align: right; color: #c0392b;'>+ ", round(sum_TP_conc, 3), " mg/l</td></tr>",
+                              "<tr style='background: #f8f9fa; font-weight: bold; border-top: 2px solid #bdc3c7;'>",
+                              "<td style='padding: 6px 4px;'>📊 Galutinė TP</td>",
+                              "<td style='text-align: right; padding: 6px 4px;'>", round(tp_conc_f, 3), " mg/l</td>",
+                              "</tr>",
+                              "</table>",
+
+                              # Būklės badge su dinamine spalva iš jūsų paletės
+                              "<div style='margin-top: 12px; padding: 8px; border-radius: 4px; text-align: center; font-weight: bold; font-size: 13px; ",
+                              "background-color: ", pal(TP_class), "; ",
+                              "color: ", ifelse(TP_class %in% c(1, 2, 5), "white", "#2c3e50"), ";'>", # Teksto kontrastas
+                              "Būklė: ", class_label(TP_class),
+                              "</div>",
+                              "</div>"
                             )
     )
 
@@ -308,26 +341,65 @@ server <- function(input, output, session) {
 
     # Point Sources
     if (!is.null(g$ps) && nrow(g$ps) > 0) {
+      # Determine which column to use for scaling based on the dropdown
+      target_col <- switch(input$select_nutrient,
+                           "Bendrasis azotas"   = "Bendrasis azotas (kg/metus)",
+                           "Bendrasis fosforas" = "Bendrasis fosforas (kg/metus)")
+
+      # Sort and extract the values for sizing
+      ps_sorted <- g$ps %>%
+        arrange(desc(across(all_of(target_col))))
+      size_values <- ps_sorted[[target_col]]
 
       # Scale radius: sqrt scaling, clamped between 4 and 20
-      flow <- g$ps[["Nuotėkų kiekis 1000 m3/metus"]]
-      radius_scaled <- pmax(4, pmin(20, 4 + sqrt(flow / max(flow, na.rm = TRUE)) * 16))
+      # Added a safety check for max(size_values) to avoid division by zero
+      max_val <- max(size_values, na.rm = TRUE)
+      if(max_val == 0) max_val <- 1
+
+      radius_scaled <- pmax(4, pmin(20, 4 + sqrt(size_values / max_val) * 16))
 
       proxy |> addCircleMarkers(
-        data = g$ps,
+        data = ps_sorted,
         group = "Taškiniai šaltiniai",
         radius = radius_scaled,
-        color       = "black",      # outline
-        fillColor   = "red",        # fill
-        weight      = 1,            # outline thickness
+        color = "white",      # outline
+        fillColor   = "red",
+        fillOpacity = 0.7,# fill
+        weight = 1.5,            # outline thickness
         stroke = TRUE,
-        fillOpacity = 0.8,
         popup = ~paste0(
-          "<b>Pavadinimas:</b> ", Pavadinimas, "<br>",
-          "<b>Išleistuvo kodas:</b> ", `Išleistuvo kodas`, "<br>",
-          "<b>B. azotas (kg/metus):</b> ", `Bendrasis azotas (kg/metus)`, "<br>",
-          "<b>B. fosforas (kg/metus):</b> ", `Bendrasis fosforas (kg/metus)`, "<br>",
-          "<b>Nuotėkų kiekis 1000 m3/metus:</b> ", `Nuotėkų kiekis 1000 m3/metus`
+          "<div style='font-family: Arial, sans-serif; min-width: 200px;'>",
+          # Pavadinimas ir Kodas
+          "<h4 style='margin: 0 0 5px 0; color: #2C3E50; border-bottom: 2px solid #3498DB; padding-bottom: 5px;'>", Pavadinimas, "</h4>",
+          "<small style='color: #7F8C8D;'>Išleistuvo kodas: ", `Išleistuvo kodas`, "</small><br><br>",
+
+          # Nuotėkų kiekis
+          "<div style='margin-bottom: 8px;'>",
+          "💧 <b>Nuotėkų kiekis:</b> <span style='float: right;'>", `Nuotėkų kiekis 1000 m3/metus`, " tūkst. m³/m.</span>",
+          "</div>",
+
+          # Azotas (N) grupė
+          "<div style='background: #EBF5FB; padding: 5px; border-radius: 4px; margin-bottom: 5px;'>",
+          "🌱 <b>Bendrasis azotas:</b><br>",
+          "<div style='padding-left: 15px;'>",
+          "• Koncentracija: <b style='color: #2980B9;'>",
+          ifelse(`Nuotėkų kiekis 1000 m3/metus` > 0, round(`Bendrasis azotas (kg/metus)`/`Nuotėkų kiekis 1000 m3/metus`, 1), 0),
+          " mg/l</b><br>",
+          "• Metinis krūvis: ", `Bendrasis azotas (kg/metus)`, " kg/metus",
+          "</div>",
+          "</div>",
+
+          # Fosforas (P) grupė
+          "<div style='background: #FEF9E7; padding: 5px; border-radius: 4px;'>",
+          "🧪 <b>Bendrasis fosforas:</b><br>",
+          "<div style='padding-left: 15px;'>",
+          "• Koncentracija: <b style='color: #D4AC0D;'>",
+          ifelse(`Nuotėkų kiekis 1000 m3/metus` > 0, round(`Bendrasis fosforas (kg/metus)`/`Nuotėkų kiekis 1000 m3/metus`, 2), 0),
+          " mg/l</b><br>",
+          "• Metinis krūvis: ", `Bendrasis fosforas (kg/metus)`, " kg/metus",
+          "</div>",
+          "</div>",
+          "</div>"
         )
       )
     }
@@ -345,28 +417,29 @@ server <- function(input, output, session) {
   output$selection_info <- renderUI({
     req(input$select_cach != "")
 
-    wb_info <- wb_names %>%
-      filter(`VT kodas` == input$select_cach)
-
+    # 1. Duomenų paruošimas
+    wb_info <- wb_names %>% filter(`VT kodas` == input$select_cach)
     wb_name <- if (nrow(wb_info) > 0) wb_info$Pavadinimas[1] else "—"
     wb_type <- if (nrow(wb_info) > 0) wb_info$tipas[1]       else "—"
 
-    prob_info <- wb_problematic %>%
-      filter(wb_code == input$select_cach)
-
+    prob_info <- wb_problematic %>% filter(wb_code == input$select_cach)
     imp_tn <- if (nrow(prob_info) > 0) prob_info$imp_tn[1] else NA
     imp_tp <- if (nrow(prob_info) > 0) prob_info$imp_tp[1] else NA
 
-    tn_badge <- if (isTRUE(imp_tn))
-      tags$span("⚠ TN problema", style = "background:#fde8e8; color:#c0392b; padding:1px 7px; border-radius:10px; font-size:14px; font-weight:600;")
-    else
-      tags$span("✓ TN gerai",    style = "background:#eafaf1; color:#27ae60; padding:1px 7px; border-radius:10px; font-size:14px; font-weight:600;")
+    # Indikatoriai (Badges)
+    tn_badge <- if (isTRUE(imp_tn)) {
+      tags$span("⚠ TN problema", style = "background:#fde8e8; color:#c0392b; padding:2px 8px; border-radius:12px; font-size:12px; font-weight:600; border: 1px solid #f5b7b1;")
+    } else {
+      tags$span("✓ TN gerai", style = "background:#eafaf1; color:#27ae60; padding:2px 8px; border-radius:12px; font-size:12px; font-weight:600; border: 1px solid #abebc6;")
+    }
 
-    tp_badge <- if (isTRUE(imp_tp))
-      tags$span("⚠ TP problema", style = "background:#fde8e8; color:#c0392b; padding:1px 7px; border-radius:10px; font-size:14px; font-weight:600;")
-    else
-      tags$span("✓ TP gerai",    style = "background:#eafaf1; color:#27ae60; padding:1px 7px; border-radius:10px; font-size:14px; font-weight:600;")
+    tp_badge <- if (isTRUE(imp_tp)) {
+      tags$span("⚠ TP problema", style = "background:#fde8e8; color:#c0392b; padding:2px 8px; border-radius:12px; font-size:12px; font-weight:600; border: 1px solid #f5b7b1;")
+    } else {
+      tags$span("✓ TP gerai", style = "background:#eafaf1; color:#27ae60; padding:2px 8px; border-radius:12px; font-size:12px; font-weight:600; border: 1px solid #abebc6;")
+    }
 
+    # Skaičiavimai
     totals <- table_data()$inflow |>
       summarise(
         total_area = sum(area, na.rm = TRUE),
@@ -376,105 +449,117 @@ server <- function(input, output, session) {
       )
 
     totals_id <- table_data()$inflow[table_data()$inflow$cach_id == id_for_tables(),]
-
-    # Scenario-Specific Concentrations
     conc_data <- table_data_conc()
     current_flow <- conc_data$flo_out[1]
     seconds_in_year <- 365.25 * 24 * 3600
-    ## Calculate Maximum Possible Load (t/metus) if concentrations were at the threshold level for the entire flow
+
     max_load_n <- (current_flow * 3 * seconds_in_year) / 1e6
     max_load_p <- (current_flow * 0.14 * seconds_in_year) / 1e6
-
-    # Calculate Current Yearly Load (t/metus) for comparison
     current_load_n <- (current_flow * conc_data$tn_conc_f[1] * seconds_in_year) / 1e6
     current_load_p <- (current_flow * conc_data$tp_conc_f[1] * seconds_in_year) / 1e6
 
-    # Required reduction to meet thresholds
-    req_red_n <- max_load_n - current_load_n
-    req_red_p <- max_load_p - current_load_p
+    # Apkrovos procentas progresio juostoms
+    pct_n <- min(100, round((current_load_n / max_load_n) * 100))
+    pct_p <- min(100, round((current_load_p / max_load_p) * 100))
 
-    # Required reduction to meet thresholds set to 0 if above 0
-    req_red_n <- if(req_red_n < 0) req_red_n else 0
-    req_red_p <- if(req_red_p < 0) req_red_p else 0
+    bar_color_n <- if(current_load_n > max_load_n) "#e74c3c" else "#2ecc71"
+    bar_color_p <- if(current_load_p > max_load_p) "#e74c3c" else "#2ecc71"
 
-    # Calculate the contribution of point sources to the current load
+    # Reikalavimų logika
+    req_red_n <- if(max_load_n - current_load_n < 0) max_load_n - current_load_n else 0
+    req_red_p <- if(max_load_p - current_load_p < 0) max_load_p - current_load_p else 0
     ps_load_n <- (current_flow * conc_data$sum_TN_conc[1] * seconds_in_year) / 1e6
     ps_load_p <- (current_flow * conc_data$sum_TP_conc[1] * seconds_in_year) / 1e6
 
-    # Calculate the required percentage reduction in point source loads to meet the thresholds, only if reduction is needed and possible
-    # For TN
+    # TN Reikalavimas
     if(req_red_n == 0) {
-      tn_requirement <- span(style = "color:#276940; font-weight:bold; font-size:14px;", "mažinimas nereikalingas!")
+      tn_requirement <- span(style = "color:#27ae60; font-weight:bold;", "mažinimas nereikalingas")
     } else if (abs(req_red_n) <= ps_load_n) {
-      tn_requirement <- round(100 * req_red_n/ ps_load_n, 1)
-      tn_requirement <- span(style = "color:#D4660F; font-weight:bold; font-size:14px;", paste(tn_requirement, "%"))
+      tn_requirement <- span(style = "color:#d35400; font-weight:bold;", paste("-", round(100 * abs(req_red_n)/ ps_load_n, 1), "%"))
     } else {
-      tn_requirement <- span(style = "color:#C41800; font-weight:bold; font-size:14px;",  "neįmanomas!!!")
+      tn_requirement <- span(style = "color:#c0392b; font-weight:bold;", "neįmanomas!!!")
     }
 
-    # For TP
+    # TP Reikalavimas
     if(req_red_p == 0) {
-      tp_requirement <- span(style = "color:#276940; font-weight:bold; font-size:14px;", "mažinimas nereikalingas!")
+      tp_requirement <- span(style = "color:#27ae60; font-weight:bold;", "mažinimas nereikalingas")
     } else if (abs(req_red_p) <= ps_load_p) {
-      tp_requirement <- round(100 * req_red_p/ ps_load_p, 1)
-      tp_requirement <- span(style = "color:#D4660F; font-weight:bold; font-size:14px;", paste(tp_requirement, "%"))
+      tp_requirement <- span(style = "color:#d35400; font-weight:bold;", paste("-", round(100 * abs(req_red_p)/ ps_load_p, 1), "%"))
     } else {
-      tp_requirement <- span(style = "color:#C41800; font-weight:bold; font-size:14px;",  "neįmanomas!!!")
+      tp_requirement <- span(style = "color:#c0392b; font-weight:bold;", "neįmanomas!!!")
     }
 
-    ps_number <- if (!is.null(ps_data()) && is.data.frame(ps_data())) {
-      nrow(ps_data())
-    } else {
-      0
-    }
+    ps_number <- if (!is.null(ps_data()) && is.data.frame(ps_data())) nrow(ps_data()) else 0
 
-    div(
-      style = "background:#f8f9fa; border:1px solid #dee2e6; border-radius:6px;
-             padding:8px 14px; font-size:13px; line-height:1.9;",
-      div(style = "font-size:14px; margin-bottom:8px; color:#2c3e50;",
-          tags$b("VANDENS TELKINIO INFORMACIJA")),
-      tags$hr(style="margin: 5px 0 10px 0; border-top: 1px solid #ccc;"),
-      tags$b("Pavadinimas: "), wb_name, tags$br(),
-      tags$b("Tipas: "), wb_type, tags$br(),
-      tags$b("VT kodas: "), input$select_cach, tags$br(),
-      tags$b("Kas negerai?: "), tn_badge, " ", tp_badge,  tags$br(),
-      tags$b("Plotas LT: "), totals$total_area,  " km2", tags$br(),
-      tags$b("Visas plotas: "), totals$total_area + totals$added_area + totals$inflow_area, " km2", tags$br(),
-      tags$b("Segmentų ilgis: "), totals$len, " km", tags$br(),
-      tags$b("Taškinių šaltinių sk.: "), ps_number, tags$br(),
-      tags$b("Bazinis sc. NT krūvis: "), totals_id$zero_N_load, " t/m", tags$br(),
-      tags$b("Bazinis sc. PT krūvis:"), totals_id$zero_P_load, " t/m", tags$br(),
-      tags$b("Debitas: "), round(current_flow, 3), " m3/s", tags$br(),
-      tags$hr(style="margin: 5px 0; border-top: 1px dashed #ccc;"),
-      # Nitrogen Info
-      div(style = "margin-top:5px; color:#2c3e50; font-weight:bold;", "B. azotas:"),
-      tags$ul(style = "margin-bottom:5px; padding-left:20px;",
-              tags$li("Esama konc.: ", round(conc_data$tn_conc_f[1], 2), " N mg/l"),
-              tags$li("Maks. leistinas krūvis: ", tags$b(round(max_load_n, 2)), " t/m"),
-              tags$li("Esamas metinis krūvis: ", round(current_load_n, 2), " t/m"),
-              tags$li("Reikalingas sumažinimas: ", round(req_red_n, 2), " t/m"),
-              tags$li("Taškinių šaltinių indėlis: ", round(ps_load_n, 2), " t/m"),
-              tags$li("Reikalingas min. šaltinių sumažinimas pasiekti g.b.:",
-                      tags$br(),
-                      tn_requirement
-              )
-      ),
+    # --- UI KONSTRUKCIJA ---
+    div(style = "background:#ffffff; border:1px solid #e0e0e0; border-radius:8px; padding:16px; font-family: 'Segoe UI', sans-serif; box-shadow: 0 2px 4px rgba(0,0,0,0.05);",
 
-      # Phosphorus Info
-      div(style = "color:#2c3e50; font-weight:bold;", "B. fosforas:"),
-      tags$ul(style = "margin-bottom:5px; padding-left:20px;",
-              tags$li("Esama konc.: ", round(conc_data$tp_conc_f[1], 3), " P mg/l"),
-              tags$li("Maks. leistinas krūvis: ", tags$b(round(max_load_p, 3)), " t/m"),
-              tags$li("Esamas metinis krūvis: ", round(current_load_p, 3), " t/m"),
-              tags$li("Reikalingas sumažinimas: ", round(req_red_p, 2), " t/m"),
-              tags$li("Taškinių šaltinių indėlis ", round(ps_load_p, 3), " t/m"),
-              tags$li("Reikalingas min. šaltinių sumažinimas pasiekti g.b.:",
-                      tags$br(),
-                      tp_requirement
-              )
-      ),
-      tags$hr(style="margin: 5px 0; border-top: 1px dashed #ccc;"),
+        # Antraštė
+        div(style = "border-bottom: 2px solid #3498db; padding-bottom: 8px; margin-bottom: 15px;",
+            div(style = "font-size: 18px; font-weight: bold; color: #2c3e50;", "📊 ", wb_name),
+            div(style = "color: #7f8c8d; font-size: 12px;", "Kodas: ", input$select_cach, " | Tipas: ", wb_type)
+        ),
 
+        # Pagrindiniai rodikliai
+        fluidRow(
+          column(6,
+                 div(style="font-size:13px;", tags$b("Debitas: "), span(style="color:#2980b9; font-weight:bold;", round(current_flow, 3), " m³/s")),
+                 div(style="font-size:13px;", tags$b("Taškinių šaltinių: "), ps_number)
+          ),
+          column(6, style="text-align: right;", tn_badge, tp_badge)
+        ),
+
+        tags$hr(style="margin: 15px 0; border-top: 1px solid #eee;"),
+
+        # Azoto ir Fosforo sekcijos
+        fluidRow(
+          # AZOTAS
+          column(6, style = "border-right: 1px solid #f0f0f0;",
+                 div(style = "font-weight: bold; color: #2980b9; margin-bottom: 8px; font-size: 14px;", "🌱 Bendrasis azotas (TN)"),
+
+                 # Progresas
+                 div(style = "background: #f0f0f0; border-radius: 4px; height: 8px; margin-bottom: 4px;",
+                     div(style = paste0("background:", bar_color_n, "; width:", pct_n, "%; height: 8px; border-radius: 4px;"))
+                 ),
+                 div(style = "font-size: 10px; color: #95a5a6; margin-bottom: 10px;", "Apkrova: ", pct_n, "% nuo leistinos"),
+
+                 div(style = "font-size: 12px; line-height: 1.6;",
+                     div("📍 Konc: ", tags$b(round(conc_data$tn_conc_f[1], 2)), " mg/l"),
+                     div("📉 Maks. krūvis: ", round(max_load_n, 1), " t/m"),
+                     div("📈 Esamas krūvis: ", tags$b(round(current_load_n, 1)), " t/m"),
+                     div("🏭 Taškiniai: ", round(ps_load_n, 2), " t/m"),
+                     div(style = "margin-top:8px; padding: 6px; background: #fcf8f2; border-radius: 4px; border: 1px solid #faebcc;",
+                         tags$b("🎯 Mažinimas: "), tn_requirement)
+                 )
+          ),
+
+          # FOSFORAS
+          column(6,
+                 div(style = "font-weight: bold; color: #d35400; margin-bottom: 8px; font-size: 14px;", "🧪 Bendrasis fosforas (TP)"),
+
+                 # Progresas
+                 div(style = "background: #f0f0f0; border-radius: 4px; height: 8px; margin-bottom: 4px;",
+                     div(style = paste0("background:", bar_color_p, "; width:", pct_p, "%; height: 8px; border-radius: 4px;"))
+                 ),
+                 div(style = "font-size: 10px; color: #95a5a6; margin-bottom: 10px;", "Apkrova: ", pct_p, "% nuo leistinos"),
+
+                 div(style = "font-size: 12px; line-height: 1.6;",
+                     div("📍 Konc: ", tags$b(round(conc_data$tp_conc_f[1], 3)), " mg/l"),
+                     div("📉 Maks. krūvis: ", round(max_load_p, 2), " t/m"),
+                     div("📈 Esamas krūvis: ", tags$b(round(current_load_p, 2)), " t/m"),
+                     div("🏭 Taškiniai: ", round(ps_load_p, 3), " t/m"),
+                     div(style = "margin-top:8px; padding: 6px; background: #fcf8f2; border-radius: 4px; border: 1px solid #faebcc;",
+                         tags$b("🎯 Mažinimas: "), tp_requirement)
+                 )
+          )
+        ),
+
+        # Footer - Techninė informacija
+        div(style = "margin-top: 20px; padding-top: 10px; border-top: 1px dashed #ddd; font-size: 11px; color: #95a5a6; display: flex; justify-content: space-between;",
+            span(tags$b("Plotas (LT): "), totals$total_area, " km²"),
+            span(tags$b("Ilgis: "), totals$len, " km"),
+            span(tags$b("Visas plotas: "), round(totals$total_area + totals$added_area + totals$inflow_area, 1), " km²")
+        )
     )
   })
 
