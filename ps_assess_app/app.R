@@ -22,7 +22,8 @@ data_path <- "Data"
 ## Load the water body names and types
 wb_names <- readRDS(file.path("..", data_path, "wb_names.rds")) |>
   filter(nchar(`VT kodas`) > 6) |>
-  mutate(tipas = ifelse(tipas == "U", "Upė", "Ežeras/Tvenkinys"))
+  mutate(tipas = ifelse(tipas == "U", "Upė", "Ežeras/Tvenkinys")) |>
+  add_row(`VT kodas` = "LT200121361", Pavadinimas = "Guntinas", tipas = "Upė")
 
 ## Loading saved objects needed to the app
 river_map <- readRDS(file.path("..", temp_folder, "river_map.rds"))
@@ -45,9 +46,17 @@ wb_problematic <- read.xlsx(wb_rel, sheet = "problem_wb")
 ## 3) Setting page -----
 ## >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-## Extract unique water body IDs for the dropdown choices
-problem_wb_ids <- unique(wb_problematic$wb_code)
+## Extract water body IDs for the dropdown choices
+problem_wb_choices <- wb_problematic |>
+  left_join(wb_names, by = c("wb_code" = "VT kodas")) |>
+  mutate(label = ifelse(!is.na(Pavadinimas),
+                        paste0(Pavadinimas, " (", wb_code, ")"),
+                        wb_code)) |>
+  select(label, wb_code) |>
+  distinct()
 
+problem_wb_named <- setNames(problem_wb_choices$wb_code,
+                             problem_wb_choices$label)
 ## PS scenarios
 ps_scenarios <- names(river_map[[1]]$ps_load)
 
@@ -61,9 +70,9 @@ ui <- fluidPage(
     # Convert names to numeric, sort them, then convert back to character for the input
     sidebarPanel(
       selectizeInput("select_cach", "Probleminiai vandens telkiniai:",
-                     choices  = problem_wb_ids,
+                     choices  = problem_wb_named,
                      selected = character(0),
-                     options  = list(placeholder = "Pasirinkite VTK...")),
+                     options  = list(placeholder = "Ieškokite pagal pavadinimą arba kodą...")),
       hr(),
       selectizeInput("select_ps_scenario", "Taškinių šaltinių scenarijai:",
                      choices  = ps_scenarios,
@@ -101,7 +110,9 @@ server <- function(input, output, session) {
   id_for_tables <- reactiveVal("")
 
   # Update dropdown choices on start
-  updateSelectizeInput(session, "select_cach", choices = problem_wb_ids, server = TRUE)
+  updateSelectizeInput(session, "select_cach",
+                       choices = problem_wb_named,
+                       server = TRUE)
 
   # When the DROPDOWN changes: look up cach_id from wb_code, update id_for_tables
   observeEvent(input$select_cach, {
