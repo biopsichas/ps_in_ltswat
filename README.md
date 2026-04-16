@@ -13,6 +13,8 @@ The purpose of this toolbox is to **automate the integration of point source pol
 - **Author**: Svajunas Plunge  
 - **Email**: svajunas_plunge@sggw.edu.pl  
 
+![](schema.jpg)
+
 ### Key Features
 1.  **Quality Assurance (QA)**: The `ps_qa.R` script is used for data validation and integrity checks to ensure point source datasets are correctly represented in LRMS.
 2.  **Impact Analysis**: `ps_impacts.R` calculates pollutant loads and evaluates their specific impacts on the water bodies (WB).
