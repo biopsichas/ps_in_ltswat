@@ -374,8 +374,7 @@ enhance integrated water management in Lithuania.</p>
 <ul>
 <li><strong>Created on</strong>: 2025-06-05<br />
 </li>
-<li><strong>Last Modified</strong>: 2026-03-05<br />
-</li>
+<li><strong>Last Modified</strong>: 2026-04-16</li>
 <li><strong>Author</strong>: Svajunas Plunge<br />
 </li>
 <li><strong>Email</strong>: <a href="mailto:svajunas_plunge@sggw.edu.pl" class="email">svajunas_plunge@sggw.edu.pl</a></li>
@@ -389,22 +388,30 @@ source datasets are correctly represented in LRMS.</li>
 <li><strong>Impact Analysis</strong>: <code>ps_impacts.R</code>
 calculates pollutant loads and evaluates their specific impacts on the
 water bodies (WB).</li>
-<li><strong>Risk Assessment</strong>: <code>risk_wb_ps.R</code>
-identifies risk WBs comparing <em>base</em> and <em>change</em>
+<li><strong>Risk Assessment</strong>: <code>ps_risk_wb.R</code>
+identifies risk WBs by comparing <em>base</em> and <em>change</em>
 scenarios.</li>
-<li><strong>Modular Functions</strong>: Core logic and shared utilities
-are maintained in <code>function.R</code> to ensure consistency across
-different analysis steps.</li>
+<li><strong>Point Source Assessment</strong>:<code>ps_assess.R</code>
+(and related updates in ps_risk_wb.R) provides capabilities to calculate
+the contribution of each point source to pollutant loading in all
+downstream water bodies.</li>
+<li><strong>Interactive App</strong>: The
+<strong><code>ps_assess_app/</code></strong> directory contains a
+dedicated application for the interactive assessment of point source
+impacts.</li>
+<li><strong>Modular Functions</strong>: : Core logic, shared utilities,
+and features like date filtering are maintained in
+<code>function.R</code> to ensure consistency across the toolbox. ###
+Repository Structure</li>
 </ol>
-</div>
-<div id="repository-structure" class="section level3">
-<h3>Repository Structure</h3>
 <pre><code>LT-SWAT-PS-Processing/
 ├── Data/                # Directory for storing raw and processed datasets
+├── ps_assess.R          # Script for calculating point source contributions to water bodies
+├── ps_assess_app/       # Source code for the interactive assessment application
 ├── function.R           # Collection of custom R functions used across scripts
 ├── ps_impacts.R         # Script for assessing environmental impacts of point sources
 ├── ps_qa.R              # Quality assurance and data cleaning for point source datasets
-├── risk_wb_ps.R         # Water body risk assessment based on point source loads
+├── ps_risk_wb.R         # Water body risk assessment based on point source loads
 ├── update_small.R       # Utility script for updating small point source datasets
 ├── .Renviron            # Environment variables configuration (e.g., Postgres database connection)
 ├── ps_in_ltswat.Rproj   # RStudio project file for the LT-SWAT PS processing workflow
@@ -449,7 +456,9 @@ load the necessary utilities for the project.</li>
 <li><strong>Run Scripts</strong>:
 <ul>
 <li>Execute <code>ps_qa.R</code> to validate your data.</li>
-<li>Execute <code>ps_impacts.R</code> or <code>risk_wb_ps.R</code> to
+<li>Use <code>ps_assess.R</code> or the <code>ps_assess_app/</code> for
+data assessment.</li>
+<li>Execute <code>ps_impacts.R</code> or <code>ps_risk_wb.R</code> to
 generate model inputs and risk reports.</li>
 </ul></li>
 </ol>

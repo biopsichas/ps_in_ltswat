@@ -9,20 +9,23 @@ The purpose of this toolbox is to **automate the integration of point source pol
 ## Project Overview
 
 - **Created on**: 2025-06-05  
-- **Last Modified**: 2026-03-05  
+- **Last Modified**: 2026-04-16
 - **Author**: Svajunas Plunge  
 - **Email**: svajunas_plunge@sggw.edu.pl  
 
 ### Key Features
-1.  **Quality Assurance (QA)**: The `ps_qa.R` script is used for data validation and integrity checks to ensure point source datasets are  correctly represented in LRMS.
+1.  **Quality Assurance (QA)**: The `ps_qa.R` script is used for data validation and integrity checks to ensure point source datasets are correctly represented in LRMS.
 2.  **Impact Analysis**: `ps_impacts.R` calculates pollutant loads and evaluates their specific impacts on the water bodies (WB).
-3.  **Risk Assessment**: `ps_risk_wb.R` identifies risk WBs comparing *base* and *change* scenarios. 
-4.  **Modular Functions**: Core logic and shared utilities are maintained in `function.R` to ensure consistency across different analysis steps.
-
+3.  **Risk Assessment**: `ps_risk_wb.R` identifies risk WBs by comparing *base* and *change* scenarios.
+4.  **Point Source Assessment**:`ps_assess.R` (and related updates in ps_risk_wb.R) provides capabilities to calculate the contribution of each point source to pollutant loading in all downstream water bodies.
+5.  **Interactive App**: The **`ps_assess_app/`** directory contains a dedicated application for the interactive assessment of point source impacts.
+6.  **Modular Functions**: : Core logic, shared utilities, and features like date filtering are maintained in `function.R` to ensure consistency across the toolbox.
 ### Repository Structure
 ```
 LT-SWAT-PS-Processing/
 ├── Data/                # Directory for storing raw and processed datasets
+├── ps_assess.R          # Script for calculating point source contributions to water bodies
+├── ps_assess_app/       # Source code for the interactive assessment application
 ├── function.R           # Collection of custom R functions used across scripts
 ├── ps_impacts.R         # Script for assessing environmental impacts of point sources
 ├── ps_qa.R              # Quality assurance and data cleaning for point source datasets
@@ -52,6 +55,7 @@ LT-SWAT-PS-Processing/
 4.  **Load Functions**: Source `function.R` to load the necessary utilities for the project.
 5.  **Run Scripts**:
     *   Execute `ps_qa.R` to validate your data.
+    *   Use `ps_assess.R` or the `ps_assess_app/` for data assessment.
     *   Execute `ps_impacts.R` or `ps_risk_wb.R` to generate model inputs and risk reports.
 
 ## Acknowledgments
